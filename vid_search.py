@@ -24,7 +24,7 @@ with sr.AudioFile("what.wav") as source:
         except sr.UnknownValueError:
             print(f"Speech not recognized at: {offset} to {offset + chunk_duration}")
         offset += chunk_duration"""
-
+#use whisper to identify text and its timestamp for search functionality
 model = whisper.load_model("tiny")
 result = model.transcribe("what.mp4")
 print(result["text"])
