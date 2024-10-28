@@ -25,6 +25,11 @@ with sr.AudioFile("what.wav") as source:
             print(f"Speech not recognized at: {offset} to {offset + chunk_duration}")
         offset += chunk_duration"""
 #use whisper to identify text and its timestamp for search functionality
-model = whisper.load_model("tiny")
-result = model.transcribe("what.mp4")
-print(result["text"])
+model = whisper.load_model("base")
+result = model.transcribe("videos/msg.mp4", word_timestamps=True)
+
+for segment in result['segments']:
+    print(f"Segment: {segment['text']}, Start: {segment['start']}, End: {segment['end']}")
+    if 'words' in segment:
+        for word in segment['words']:
+            print(f"  Word: {word['word']}, Start: {word['start']}, End: {word['end']}")
