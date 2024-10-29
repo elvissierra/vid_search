@@ -1,20 +1,52 @@
-<script setup>
-defineProps({
-  msg: {
-    type: String,
-    required: true
-  }
-})
-</script>
-
 <template>
-  <div class="greetings">
-    <h1 class="green">{{ msg }}</h1>
-    <h3>
-      This will be the Key Search Page.
-    </h3>
+  <div class="keysearch">
+    <h1>Search within Video</h1>
+    <input v-model="keyword" placeholder="Enter a keyword" />
+    <button @click="keywordSearch">Search</button>
+
+    <div v-if="results.length > 0">
+      <h2>Results:</h2>
+      <ul>
+        <li v-for="(result, index) in results" :key="index">
+          Word: {{ result[0] }}, Start: {{ result[1] }}s, End: {{ result[2] }}s
+          <button @click="jumpToTime(result[1])">Jump to Time</button>
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
+
+<script>
+export default {
+  data() {
+    return {
+      keyword: '',
+      results: []
+    };
+  },
+  methods: {
+    async keywordSearch() {
+      try {
+        const response = await this.$axios.get('/api/search', {
+          params: {
+            keyword: this.keyword,
+            video_id: 1
+          }
+        });
+        this.results = response.data;
+      } catch (error) {
+        console.error('Error fetching search results:', error);
+      }
+    },
+    jumpToTime(time) {
+      const video = document.getElementById('videoPlayer');
+      video.currentTime = time;
+      video.play();
+    }
+  }
+};
+</script>
+
 
 <style scoped>
 h1 {
