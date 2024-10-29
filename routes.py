@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import psycopg2
@@ -6,8 +7,9 @@ import environ
 env = environ.Env()
 environ.Env.read_env()
 
+cors_origins = env("CORS_ORIGINS").split(",")
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
+CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
 @app.route('/api/search', methods=['GET'])
 def search_keyword():
