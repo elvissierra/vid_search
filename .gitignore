@@ -2,3 +2,12 @@
 .env
 videos
 __pycache__
+
+.vscode
+public
+node_modules
+dist/
+build/
+.cache/
+.prettierrc.json
+eslint.config.js
