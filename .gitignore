@@ -1,3 +1,4 @@
 .vs
 .env
 videos
+__pycache__

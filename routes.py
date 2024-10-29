@@ -13,7 +13,7 @@ def search_keyword():
     video_id = request.args.get('video_id')
 
     with psycopg2.connect(
-        dbname=env("DA_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
+        dbname=env("DB_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
         ) as conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
