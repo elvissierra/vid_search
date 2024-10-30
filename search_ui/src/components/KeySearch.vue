@@ -1,6 +1,7 @@
 <template>
   <div class="keysearch">
     <h1>Search within Video</h1>
+    <input v-model="videoUrl" placeholder="Enter Video URL" />
     <input v-model="keyword" placeholder="Enter a keyword" />
     <button @click="keywordSearch">Search</button>
 
@@ -20,6 +21,7 @@
 export default {
   data() {
     return {
+      videoUrl: '',
       keyword: '',
       results: []
     };
@@ -27,13 +29,18 @@ export default {
   methods: {
     async keywordSearch() {
       try {
-        const response = await this.$axios.get('/api/search', {
+        const response = await this.$axios.post('/api/search', {
+          url: this.videoUrl
+        }, {
           params: {
-            keyword: this.keyword,
-            video_id: 1
+            keyword: this.keyword
           }
         });
-        this.results = response.data;
+        
+        this.results = response.data.results;
+        const videoId = response.data.video_id;
+        console.log('Generated video_id:', videoId);
+
       } catch (error) {
         console.error('Error fetching search results:', error);
       }
@@ -46,7 +53,6 @@ export default {
   }
 };
 </script>
-
 
 <style scoped>
 h1 {
