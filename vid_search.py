@@ -22,7 +22,7 @@ def transcribe_save(url, video_id):
         )as conn:
             with conn.cursor()as cursor:
 
-                conn.execute(
+                cursor.execute(
                     """
                     INSERT INTO transcripts (segment_text, word, start_time, end_time)
                     VALUES (%s, %s, %s, %s)
@@ -43,7 +43,7 @@ def transcribe_save(url, video_id):
                         cursor.execute(
                             """
                             INSERT INTO transcripts (video_id, segment_text, word, start_time, end_time)
-                            VALUES (%s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s)
                             """,
                             (video_id, segment_text, word_text, start_time, end_time)
                         )
@@ -51,8 +51,6 @@ def transcribe_save(url, video_id):
 
             return video_id
     
-
-
 if __name__ == "__main__":
     video_url = 'https://www.youtube.com/watch?v=5GzFhlfxGxc&ab_channel=HouseofHighlights'
     video_id = 2 
