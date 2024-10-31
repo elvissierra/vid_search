@@ -14,6 +14,9 @@
         </li>
       </ul>
     </div>
+    <div v-else>
+      <p>No results found for the keyword "{{ keyword }}"</p>
+    </div>
   </div>
 </template>
 
@@ -37,9 +40,10 @@ export default {
           }
         });
         
-        this.results = response.data.results;
+        this.results = response.data.results || [];
         const videoId = response.data.video_id;
         console.log('Generated video_id:', videoId);
+        console.log('Search results:', this.results);
 
       } catch (error) {
         console.error('Error fetching search results:', error);
