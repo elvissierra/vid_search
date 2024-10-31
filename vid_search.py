@@ -45,8 +45,10 @@ def transcribe_save(url):
                     VALUES (%s, %s, %s, %s)
                     RETURNING video_id;
                     """,
-                    (str(result['segments'][0]['text']), str(result['segments'][0]['words'][0]['word']), 
-                    float(result['segments'][0]['words'][0]['start']), float(result['segments'][0]['words'][0]['end']))
+                    (str(result['segments'][0]['text']),
+                    str(result['segments'][0]['words'][0]['word']), 
+                    float(result['segments'][0]['words'][0]['start']),
+                    float(result['segments'][0]['words'][0]['end']))
                 )
                 video_id = cursor.fetchone()[0]
 
