@@ -2,6 +2,7 @@ import psycopg2
 import environ
 import whisper
 import yt_dlp
+import numpy as np
 
 env = environ.Env()
 environ.Env.read_env()
@@ -44,15 +45,15 @@ def transcribe_save(url):
                     VALUES (%s, %s, %s, %s)
                     RETURNING video_id;
                     """,
-                    (result['segments'][0]['text'], result['segments'][0]['words'][0]['word'], 
-                    result['segments'][0]['words'][0]['start'], result['segments'][0]['words'][0]['end'])
+                    (str(result['segments'][0]['text']), str(result['segments'][0]['words'][0]['word']), 
+                    float(result['segments'][0]['words'][0]['start']), float(result['segments'][0]['words'][0]['end']))
                 )
                 video_id = cursor.fetchone()[0]
 
                 for segment in result["segments"]:
-                    segment_text = segment['text']
+                    segment_text = str(segment['text'])
                     for word in segment['words']:
-                        word_text = word['word']      
+                        word_text = str(word['word'])
                         start_time = float(word['start'])
                         end_time = float(word['end'])     
 
