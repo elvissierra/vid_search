@@ -1,9 +1,9 @@
 <script>
+import axios from 'axios';
 import { ref } from 'vue';
 
 export default {
   setup() {
-    // State and function setup for search functionality
     const videoUrl = ref('');
     const keyword = ref('');
     const results = ref([]);
@@ -31,7 +31,6 @@ export default {
       video.play();
     };
 
-    // Page state to toggle between Search and About views
     const currentPage = ref('search');
 
     return { videoUrl, keyword, results, keywordSearch, jumpToTime, currentPage };
