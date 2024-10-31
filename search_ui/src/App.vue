@@ -1,83 +1,150 @@
-<script setup>
-import { RouterLink, RouterView } from 'vue-router'
+<script>
+import { ref } from 'vue';
+
+export default {
+  setup() {
+    // State and function setup for search functionality
+    const videoUrl = ref('');
+    const keyword = ref('');
+    const results = ref([]);
+
+    const keywordSearch = async () => {
+      try {
+        const response = await axios.post('/api/search', {
+          url: videoUrl.value
+        }, {
+          params: {
+            keyword: keyword.value
+          }
+        });
+
+        results.value = response.data.results || [];
+        console.log('Search results:', results.value);
+      } catch (error) {
+        console.error('Error fetching search results:', error);
+      }
+    };
+
+    const jumpToTime = (time) => {
+      const video = document.getElementById('videoPlayer');
+      video.currentTime = time;
+      video.play();
+    };
+
+    // Page state to toggle between Search and About views
+    const currentPage = ref('search');
+
+    return { videoUrl, keyword, results, keywordSearch, jumpToTime, currentPage };
+  }
+};
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="@/assets/logo.svg" width="125" height="125" />
-
-    <div class="wrapper">
-
+  <div class="app-container">
+    <header>
+      <h1>Video Search Application</h1>
       <nav>
-        <RouterLink to="/search">Search</RouterLink>
-        <RouterLink to="/about">About</RouterLink>
+        <button @click="currentPage = 'search'" :class="{ active: currentPage === 'search' }">Search</button>
+        <button @click="currentPage = 'about'" :class="{ active: currentPage === 'about' }">About</button>
       </nav>
-    </div>
-  </header>
+    </header>
 
-  <RouterView />
+    <main>
+      <section v-if="currentPage === 'search'" class="search-section">
+        <input v-model="videoUrl" placeholder="Enter Video URL" />
+        <input v-model="keyword" placeholder="Enter a keyword" />
+        <button @click="keywordSearch">Search</button>
+
+        <div v-if="results.length > 0" class="results-container">
+          <h2>Results:</h2>
+          <ul class="results-list">
+            <li v-for="(result, index) in results" :key="index">
+              <span>Word: {{ result[0] }}, Start: {{ result[1] }}s, End: {{ result[2] }}s</span>
+              <button @click="jumpToTime(result[1])">Jump to Time</button>
+            </li>
+          </ul>
+        </div>
+        <div v-else>
+          <p>No results found for the keyword "{{ keyword }}"</p>
+        </div>
+      </section>
+
+      <section v-else class="about-section">
+        <h2>About</h2>
+        <p>This application allows users to search within videos by keyword and navigate to specific timestamps.</p>
+      </section>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-header {
-  line-height: 1.5;
-  max-height: 100vh;
+.app-container {
+  max-width: 600px;
+  margin: auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
 }
 
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #ddd;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
 }
 
 nav {
-  width: 100%;
-  font-size: 12px;
+  display: flex;
+  gap: 1rem;
+}
+
+nav button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+}
+
+nav button.active {
+  font-weight: bold;
+  color: #007bff;
+  border-bottom: 2px solid #007bff;
+}
+
+.search-section,
+.about-section {
   text-align: center;
-  margin-top: 2rem;
 }
 
-nav a.router-link-exact-active {
-  color: var(--color-text);
+.results-container {
+  margin-top: 1.5rem;
 }
 
-nav a.router-link-exact-active:hover {
-  background-color: transparent;
+.results-list {
+  list-style: none;
+  padding: 0;
 }
 
-nav a {
-  display: inline-block;
-  padding: 0 1rem;
-  border-left: 1px solid var(--color-border);
+.results-list li {
+  margin-bottom: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-nav a:first-of-type {
-  border: 0;
+button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background-color 0.3s;
 }
 
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  nav {
-    text-align: left;
-    margin-left: -1rem;
-    font-size: 1rem;
-
-    padding: 1rem 0;
-    margin-top: 1rem;
-  }
+button:hover {
+  background-color: #0056b3;
 }
 </style>
