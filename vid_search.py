@@ -1,26 +1,42 @@
 import psycopg2
 import environ
 import whisper
-from pytube import YouTube
+import yt_dlp
 
 env = environ.Env()
 environ.Env.read_env()
 
 def download_video_audio(url):
-     video = YouTube(url)
-     audio_stream = video.streams.filter(only_audio=True).first()
-     output_file = audio_stream.download(output_path='videos/')
-     return output_file
+    try:
+        print(f"Attempting to download audio from: {url}")
+        ydl_opts = {
+             'format': 'bestaudio/best',
+             'postprocessors': [{
+                  'key': 'FFmpegExtractAudio',
+                  'preferredcodec': 'mp3',
+                  'preferredquality': '192',
+             }], 
+             'outtmpl': 'video/%(id)s.%(ext)s',
+        }
 
-def transcribe_save(url, video_id):
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+             info_dict = ydl.extract_info(url, download=True)
+             audio_file = ydl.prepare_filename(info_dict).replace('.webm', '.mp3')
+             print(f"Audio downloaded successfully: {audio_file}")
+             return audio_file
+    except Exception as e:
+         print(f"Error downloading video: {e}")
+         raise e
+
+def transcribe_save(url):
     audio_file = download_video_audio(url)
     model = whisper.load_model("base")
     result = model.transcribe(audio_file, word_timestamps=True)
 
     with psycopg2.connect(
         dbname=env("DB_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
-        )as conn:
-            with conn.cursor()as cursor:
+        ) as conn:
+            with conn.cursor() as cursor:
 
                 cursor.execute(
                     """
@@ -43,7 +59,7 @@ def transcribe_save(url, video_id):
                         cursor.execute(
                             """
                             INSERT INTO transcripts (video_id, segment_text, word, start_time, end_time)
-                            VALUES (%s, %s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s);
                             """,
                             (video_id, segment_text, word_text, start_time, end_time)
                         )

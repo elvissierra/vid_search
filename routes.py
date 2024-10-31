@@ -29,7 +29,7 @@ def transcribe_search():
             ) as conn:
                 with conn.cursor() as cursor:
                     cursor.execute("""
-                        SELECT  word, start_time, end_time
+                        SELECT word, start_time, end_time
                         FROM transcripts
                         WHERE video_id = %s AND word ILIKE %s
                         """, (video_id, f"%{keyword}%"))
@@ -40,7 +40,7 @@ def transcribe_search():
 
     except Exception as e:
         print(f"Error during transcription or search: {e}")
-        return jsonify({"error": "Error occured during transcription or search."}), 500
+        return jsonify({"error": f"Error occurred during transcription or search: {e}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
