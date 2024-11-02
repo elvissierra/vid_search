@@ -11,8 +11,12 @@ cors_origins = env("CORS_ORIGINS").split(",")
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
+
 @app.route('/api/search', methods=['POST'])
 def transcribe_search():
+    """
+    Keyword search, refactor to optimize word search
+    """
     data = request.get_json()
     video_url = data.get('url')
     keyword = request.args.get('keyword')
