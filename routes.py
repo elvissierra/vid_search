@@ -28,6 +28,7 @@ def transcribe_search():
         video_id = transcribe_save(video_url)
 
         if keyword:
+            regex_clean = rf"\m{keyword}\M"
             with psycopg2.connect(
                 dbname=env("DB_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
             ) as conn:
@@ -35,8 +36,8 @@ def transcribe_search():
                     cursor.execute("""
                         SELECT word, start_time, end_time
                         FROM transcripts
-                        WHERE video_id = %s AND word ILIKE %s
-                        """, (video_id, f"%{keyword}%"))
+                        WHERE video_id = %s AND word ~* %s
+                        """, (video_id, regex_clean))
                     results = cursor.fetchall()
 
             return jsonify({"video_id": video_id, "results": results}), 200
