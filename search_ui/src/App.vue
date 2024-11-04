@@ -1,43 +1,3 @@
-<script>
-import axios from 'axios';
-import { ref } from 'vue';
-
-export default {
-  setup() {
-    const videoUrl = ref('');
-    const keyword = ref('');
-    const results = ref([]);
-
-    const keywordSearch = async () => {
-      try {
-        const response = await axios.post('/api/search', {
-          url: videoUrl.value
-        }, {
-          params: {
-            keyword: keyword.value
-          }
-        });
-
-        results.value = response.data.results || [];
-        console.log('Search results:', results.value);
-      } catch (error) {
-        console.error('Error fetching search results:', error);
-      }
-    };
-
-    const jumpToTime = (time) => {
-      const video = document.getElementById('videoPlayer');
-      video.currentTime = time;
-      video.play();
-    };
-
-    const currentPage = ref('search');
-
-    return { videoUrl, keyword, results, keywordSearch, jumpToTime, currentPage };
-  }
-};
-</script>
-
 <template>
   <div class="app-container">
     <header>
@@ -52,29 +12,75 @@ export default {
       <section v-if="currentPage === 'search'" class="search-section">
         <input v-model="videoUrl" placeholder="Enter Video URL" />
         <input v-model="keyword" placeholder="Enter a keyword" />
-        <button @click="keywordSearch">Search</button>
+        <button @click="keywordSearch" :disabled="isLoading">Search</button>
 
-        <div v-if="results.length > 0" class="results-container">
+        <div v-if="isLoading" class="loading">
+          <p>Processing your search...</p>
+        </div>
+
+        <div v-if="results.length > 0 && !isLoading" class="results-container">
           <h2>Results:</h2>
           <ul class="results-list">
             <li v-for="(result, index) in results" :key="index">
-              <span>Word: {{ result[0] }}, Start: {{ result[1] }}s, End: {{ result[2] }}s</span>
+              <span>Word: {{ result[0] }} Start: {{ result[1] }}s, End: {{ result[2] }}s</span>
               <button @click="jumpToTime(result[1])">Jump to Time</button>
             </li>
           </ul>
         </div>
-        <div v-else>
-          <p>No results found for the keyword "{{ keyword }}"</p>
+
+        <div v-else-if="!isLoading && results.length === 0" class="empty-state">
+          <p>Enter a video URL and keyword to search within the video.</p>
         </div>
       </section>
 
       <section v-else class="about-section">
         <h2>About</h2>
-        <p>This application allows users to search within videos by keyword and navigate to specific timestamps.</p>
+        <p>This application allows users to search within videos by keyword and navigate to specific timestamps when keyword is mentioned.</p>
       </section>
     </main>
   </div>
 </template>
+
+
+<script>
+import axios from 'axios';
+import { ref, inject } from 'vue';
+
+export default {
+  setup() {
+    const videoUrl = ref('');
+    const keyword = ref('');
+    const results = ref([]);
+    const isLoading = ref(false); // New loading state
+
+    const keywordSearch = async () => {
+      isLoading.value = true;
+      try {
+        const response = await axios.post('/api/search', {
+          url: videoUrl.value
+        }, {
+          params: {
+            keyword: keyword.value
+          }
+        });
+
+        results.value = response.data.results || [];
+        console.log('Search results:', results.value);
+      } catch (error) {
+        console.error('Error fetching search results:', error);
+      } finally {
+        isLoading.value = false;
+      }
+    };
+
+    const currentPage = ref('search');
+
+    return { videoUrl, keyword, results, isLoading, keywordSearch, currentPage };
+  }
+};
+</script>
+
+
 
 <style scoped>
 .app-container {
@@ -145,5 +151,17 @@ button {
 
 button:hover {
   background-color: #0056b3;
+}
+
+.loading {
+  margin-top: 1rem;
+  font-size: 1rem;
+  color: #555;
+}
+
+.empty-state {
+  margin-top: 1.5rem;
+  font-size: 1rem;
+  color: #777;
 }
 </style>
