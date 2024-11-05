@@ -11,6 +11,14 @@
     <main>
       <section v-if="currentPage === 'search'" class="search-section">
         <input v-model="videoUrl" placeholder="Enter Video URL" />
+
+        <select v-model="selectedRecord" class="record-select">
+          <option disabled value="">Select a previous record</option>
+          <option v-for="(rec, index) in records" :key="index" :value="rec">{{ rec }}</option>
+        </select>
+
+        <input v-model="record" placeholder="Enter a new record label" />
+
         <input v-model="keyword" placeholder="Enter a keyword" />
         <button @click="keywordSearch" :disabled="isLoading">Search</button>
 
@@ -23,41 +31,54 @@
           <ul class="results-list">
             <li v-for="(result, index) in results" :key="index">
               <span>Word: {{ result[0] }} Start: {{ result[1] }}s, End: {{ result[2] }}s</span>
-              <button @click="jumpToTime(result[1])">Jump to Time</button>
             </li>
           </ul>
         </div>
 
         <div v-else-if="!isLoading && results.length === 0" class="empty-state">
-          <p>Enter a video URL and keyword to search within the video.</p>
+          <p>Enter a video URL, record label, and keyword to search within the video.</p>
         </div>
       </section>
 
       <section v-else class="about-section">
         <h2>About</h2>
-        <p>This application allows users to search within videos by keyword and navigate to specific timestamps when keyword is mentioned.</p>
+        <p>This application allows users to search within videos by keyword and navigate to specific timestamps when a keyword is mentioned.</p>
       </section>
     </main>
   </div>
 </template>
 
-
 <script>
 import axios from 'axios';
-import { ref, inject } from 'vue';
+import { ref, onMounted } from 'vue';
 
 export default {
   setup() {
     const videoUrl = ref('');
+    const record = ref('');
+    const selectedRecord = ref('');
     const keyword = ref('');
     const results = ref([]);
-    const isLoading = ref(false); // New loading state
+    const records = ref([]);
+    const isLoading = ref(false);
+
+    onMounted(async () => {
+      try {
+        const response = await axios.get('/api/records');
+        records.value = response.data.records || [];
+      } catch (error) {
+        console.error('Error fetching records:', error);
+      }
+    });
 
     const keywordSearch = async () => {
       isLoading.value = true;
       try {
+      
+        const recordToUse = selectedRecord.value || record.value;      
         const response = await axios.post('/api/search', {
-          url: videoUrl.value
+          url: videoUrl.value,
+          record: recordToUse,
         }, {
           params: {
             keyword: keyword.value
@@ -65,7 +86,6 @@ export default {
         });
 
         results.value = response.data.results || [];
-        console.log('Search results:', results.value);
       } catch (error) {
         console.error('Error fetching search results:', error);
       } finally {
@@ -75,12 +95,10 @@ export default {
 
     const currentPage = ref('search');
 
-    return { videoUrl, keyword, results, isLoading, keywordSearch, currentPage };
+    return { videoUrl, record, selectedRecord, keyword, results, records, isLoading, keywordSearch, currentPage };
   }
 };
 </script>
-
-
 
 <style scoped>
 .app-container {
@@ -163,5 +181,14 @@ button:hover {
   margin-top: 1.5rem;
   font-size: 1rem;
   color: #777;
+}
+
+.record-select {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  font-size: 1rem;
+  width: 100%;
+  border-radius: 4px;
+  border: 1px solid #ddd;
 }
 </style>
