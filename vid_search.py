@@ -30,37 +30,37 @@ def download_video_audio(url):
          print(f"Error downloading video: {e}")
          raise e
 
-def transcribe_save(url):
-    audio_file = download_video_audio(url)
-    model = whisper.load_model("base")
-    result = model.transcribe(audio_file, word_timestamps=True)
+def transcribe_save(url, record=None):
 
-    video_id = str(uuid.uuid4())
+        with psycopg2.connect(
+            dbname=env("DB_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
+        ) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT video_id FROM transcripts WHERE record = %s LIMIT 1;", (record,))
+                existing_record = cursor.fetchone()
+                if existing_record:
+                     return existing_record[0]
 
-    with psycopg2.connect(
-        dbname=env("DB_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
-    ) as conn:
-        with conn.cursor() as cursor:
-            for segment in result["segments"]:
-                segment_text = str(segment['text'])
-                for word in segment['words']:
-                    word_text = str(word['word'])
-                    start_time = float(word['start'])
-                    end_time = float(word['end'])
-                    
-                    cursor.execute(
-                        """
-                        INSERT INTO transcripts (video_id, segment_text, word, start_time, end_time)
-                        VALUES (%s, %s, %s, %s, %s);
-                        """,
-                        (video_id, segment_text, word_text, start_time, end_time)
-                    )
+                audio_file = download_video_audio(url)
+                model = whisper.load_model("base")
+                result = model.transcribe(audio_file, word_timestamps=True)
 
-            conn.commit()
+                video_id = str(uuid.uuid4())
 
-    return video_id
-    
-if __name__ == "__main__":
-    video_url = 'https://www.youtube.com/watch?v=5GzFhlfxGxc&ab_channel=HouseofHighlights'
-    video_id = 2 
-    transcribe_save(video_url, video_id)
+                for segment in result["segments"]:
+                    segment_text = str(segment['text'])
+                    for word in segment['words']:
+                        word_text = str(word['word'])
+                        start_time = float(word['start'])
+                        end_time = float(word['end'])
+
+                        cursor.execute(
+                            """
+                            INSERT INTO transcripts (video_id, record, segment_text, word, start_time, end_time)
+                            VALUES (%s, %s, %s, %s, %s, %s);
+                            """,
+                            (video_id, record, segment_text, word_text, start_time, end_time)
+                        )
+
+                conn.commit()
+        return video_id
