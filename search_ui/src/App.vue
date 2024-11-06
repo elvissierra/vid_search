@@ -20,7 +20,7 @@
         <input v-model="record" placeholder="Enter a new record label" />
 
         <input v-model="keyword" placeholder="Enter a keyword" />
-        <button @click="keywordSearch" :disabled="isLoading">Search</button>
+        <button @click="keywordSearch" :disabled="isLoading || (!videoUrl && !record && !selectedRecord)">Search</button>
 
         <div v-if="isLoading" class="loading">
           <p>Processing your search...</p>
@@ -74,8 +74,8 @@ export default {
     const keywordSearch = async () => {
       isLoading.value = true;
       try {
-      
-        const recordToUse = selectedRecord.value || record.value;      
+        const recordToUse = selectedRecord.value || record.value;
+
         const response = await axios.post('/api/search', {
           url: videoUrl.value,
           record: recordToUse,
