@@ -14,7 +14,7 @@ CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 @app.route('/api/records', methods=['GET'])
 def get_records():
     """
-    Retrieve all previous entries for re-use
+    Retrieve all previous entries for search
     """
     try: 
         with psycopg2.connect(
@@ -32,7 +32,7 @@ def get_records():
 @app.route('/api/search', methods=['POST'])
 def transcribe_search():
     """
-    Keyword search with record reuse and video_id association.
+    Keyword search with record and video_id association.
     """
     data = request.get_json()
     video_url = data.get('url')
@@ -70,7 +70,6 @@ def transcribe_search():
 
     except Exception as e:
         return jsonify({"error": f"Error occurred during transcription or search: {e}"}), 500
-
     
 if __name__ == "__main__":
     app.run(debug=True)
