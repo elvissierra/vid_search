@@ -14,7 +14,7 @@ CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 @app.route('/api/records', methods=['GET'])
 def get_records():
     """
-    Retrieve previous entries for re-use
+    Retrieve all previous entries for re-use
     """
     try: 
         with psycopg2.connect(
@@ -39,9 +39,6 @@ def transcribe_search():
     record = data.get('record')
     keyword = request.args.get('keyword')
 
-    # Debugging
-    print(f"Received POST request with record: {record}, video_url: {video_url}, keyword: {keyword}")
-
     try:
         with psycopg2.connect(
             dbname=env("DB_NAME"), user=env("DB_USER"), password=env("DB_PASSWORD"), host=env("DB_HOST")
@@ -59,7 +56,6 @@ def transcribe_search():
 
                 if keyword:
                     regex_clean = rf"\m{keyword}\M"
-                    print(f"Running SQL Query with video_id: {video_id}, keyword: {regex_clean}")
 
                     cursor.execute("""
                         SELECT word, start_time, end_time
@@ -68,17 +64,11 @@ def transcribe_search():
                     """, (video_id, regex_clean))
                     results = cursor.fetchall()
 
-                    if results:
-                        print(f"Search results: {results}")
-                    else:
-                        print("No results found for the keyword.")
-
                     return jsonify({"video_id": video_id, "results": results}), 200
 
                 return jsonify({"video_id": video_id, "message": "Transcription complete."}), 200
 
     except Exception as e:
-        print(f"Error during transcription or search: {e}")
         return jsonify({"error": f"Error occurred during transcription or search: {e}"}), 500
 
     
