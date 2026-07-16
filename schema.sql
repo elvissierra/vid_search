@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS transcripts (
     end_time     DOUBLE PRECISION
 );
 
+-- Speaker diarization (pyannote): label per word + segment ordinal for
+-- reconstructing segments later (exports).
+ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS segment_index INT;
+ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS speaker TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_transcripts_video ON transcripts (video_id);
 CREATE INDEX IF NOT EXISTS idx_transcripts_video_word ON transcripts (video_id, word);
 

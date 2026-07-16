@@ -3,7 +3,9 @@ import uuid
 
 import whisper
 import yt_dlp
+from psycopg2.extras import execute_values
 
+import diarize
 from db import get_conn
 
 _model = None
@@ -88,26 +90,33 @@ def transcribe_save(url, record=None):
         audio_file = download_video_audio(url)
         model = get_model()
         result = model.transcribe(audio_file, word_timestamps=True)
+        turns = diarize.diarize(audio_file)
 
         rows = []
-        for segment in result["segments"]:
+        for segment_index, segment in enumerate(result["segments"]):
             segment_text = str(segment['text'])
             for word in segment['words']:
+                start_time = float(word['start'])
+                end_time = float(word['end'])
                 rows.append((
                     video_id,
                     record,
+                    segment_index,
                     segment_text,
                     str(word['word']),
-                    float(word['start']),
-                    float(word['end']),
+                    start_time,
+                    end_time,
+                    diarize.assign_speaker(start_time, end_time, turns),
                 ))
 
         with get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.executemany(
+                execute_values(
+                    cursor,
                     """
-                    INSERT INTO transcripts (video_id, record, segment_text, word, start_time, end_time)
-                    VALUES (%s, %s, %s, %s, %s, %s);
+                    INSERT INTO transcripts
+                        (video_id, record, segment_index, segment_text, word, start_time, end_time, speaker)
+                    VALUES %s;
                     """,
                     rows
                 )

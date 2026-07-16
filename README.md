@@ -3,7 +3,9 @@
 Paste a video URL, get a searchable word-level transcript. Flask + Postgres
 backend, Vue 3 (Vite) frontend. Audio is extracted with `yt-dlp` and
 transcribed locally with OpenAI Whisper (word-level timestamps); every word is
-stored as a row in Postgres so keyword search returns exact timestamps.
+stored as a row in Postgres so keyword search returns exact timestamps. Each
+word is also tagged with a speaker label (`SPEAKER_00`, …) via pyannote
+speaker diarization.
 
 ## Prerequisites
 
@@ -34,6 +36,21 @@ cp .env.example .env
 If you have a database from before `schema.sql` existed, see the migration
 comments at the bottom of [schema.sql](schema.sql).
 
+### Speaker diarization (one-time setup)
+
+Diarization uses gated Hugging Face models. Before the first run:
+
+1. Create a token at https://huggingface.co/settings/tokens
+2. Accept the terms on **both** model pages:
+   https://huggingface.co/pyannote/speaker-diarization-3.1 and
+   https://huggingface.co/pyannote/segmentation-3.0
+3. Set `HF_TOKEN` in `.env`
+
+The first transcription downloads the model checkpoints; a 401 during
+pipeline load means the token is wrong or the terms weren't accepted. Note
+that `pip install -r requirements.txt` pulls in PyTorch (~2 GB+), and
+diarization roughly doubles per-video processing time.
+
 ## Running
 
 ```bash
@@ -47,6 +64,7 @@ cd search_ui && npm run dev # UI on http://localhost:5173
 |---|---|---|
 | `.env` | `DB_NAME` `DB_USER` `DB_PASSWORD` `DB_HOST` `DB_PORT` | Postgres connection |
 | `.env` | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `.env` | `HF_TOKEN` | Hugging Face token for pyannote diarization models |
 | `search_ui/.env` | `VITE_API_URL` | API base URL for the frontend |
 
 ## API

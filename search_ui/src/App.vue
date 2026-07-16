@@ -40,7 +40,8 @@
           <div v-else>
             <ul v-if="results.length > 0" class="results-list">
               <li v-for="(result, index) in results" :key="index">
-                <span>Word: {{ result[0] }} | Start: {{ result[1] }}s | End: {{ result[2] }}s</span>
+                <span class="speaker-badge">{{ result.speaker || 'UNKNOWN' }}</span>
+                <span>Word: {{ result.word }} | Start: {{ result.start }}s | End: {{ result.end }}s</span>
               </li>
             </ul>
             <div v-else class="empty-state">
@@ -232,6 +233,17 @@ nav button.active {
   margin-bottom: 0.75rem;
   border-bottom: 1px solid #ddd;
   padding-bottom: 0.5rem;
+}
+
+.speaker-badge {
+  display: inline-block;
+  background-color: #0066cc;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: bold;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  margin-right: 0.5rem;
 }
 
 .loading {

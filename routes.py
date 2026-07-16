@@ -61,12 +61,17 @@ def transcribe_search():
             with get_conn() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute("""
-                        SELECT word, start_time, end_time
+                        SELECT word, start_time, end_time, speaker
                         FROM transcripts
                         WHERE video_id = %s AND word ~* %s
+                        ORDER BY start_time
                     """, (video_id, regex_clean))
-                    results = cursor.fetchall()
+                    rows = cursor.fetchall()
 
+            results = [
+                {"word": word, "start": start, "end": end, "speaker": speaker}
+                for (word, start, end, speaker) in rows
+            ]
             return jsonify({"video_id": video_id, "results": results}), 200
 
         return jsonify({"video_id": video_id, "message": "Transcription complete."}), 200
