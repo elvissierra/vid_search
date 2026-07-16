@@ -1,11 +1,12 @@
 import re
+import uuid
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import environ
 
 from db import get_conn
-from vid_search import transcribe_save
+from vid_search import reserve_record
 
 env = environ.Env()
 environ.Env.read_env()
@@ -35,12 +36,14 @@ def get_records():
 @app.route('/api/search', methods=['POST'])
 def transcribe_search():
     """
-    Keyword search with record and video_id association.
+    Keyword search within a record. New records are queued for the worker:
+    the label is reserved, a job row is inserted, and a 202 with the job id
+    is returned for the client to poll via /api/jobs/<job_id>.
     """
     data = request.get_json()
     video_url = data.get('url')
     record = data.get('record')
-    keyword = request.args.get('keyword')
+    keyword = data.get('keyword')
 
     try:
         with get_conn() as conn:
@@ -51,9 +54,24 @@ def transcribe_search():
         if not existing_record:
             if not video_url:
                 return jsonify({"error": "Record or video URL is required"}), 400
-            video_id = transcribe_save(video_url, record)
-        else:
-            video_id = existing_record[0]
+
+            video_id, is_new = reserve_record(record, source_url=video_url)
+            if not is_new:
+                return jsonify({"error": "Record already exists or is being processed"}), 409
+
+            job_id = str(uuid.uuid4())
+            with get_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO jobs (id, record, url, video_id)
+                        VALUES (%s, %s, %s, %s);
+                        """,
+                        (job_id, record, video_url, video_id)
+                    )
+            return jsonify({"job_id": job_id, "record": record}), 202
+
+        video_id = existing_record[0]
 
         if keyword:
             regex_clean = rf"\m{re.escape(keyword)}\M"
@@ -78,6 +96,33 @@ def transcribe_search():
 
     except Exception:
         app.logger.exception("Transcription or search failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/jobs/<job_id>', methods=['GET'])
+def get_job(job_id):
+    """
+    Poll a transcription job's status and progress.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, status, progress, record, video_id, error, created_at, finished_at
+                    FROM jobs WHERE id = %s;
+                    """,
+                    (job_id,)
+                )
+                row = cursor.fetchone()
+
+        if not row:
+            return jsonify({"error": "Job not found"}), 404
+
+        keys = ("id", "status", "progress", "record", "video_id", "error", "created_at", "finished_at")
+        return jsonify(dict(zip(keys, row))), 200
+    except Exception:
+        app.logger.exception("Failed to fetch job")
         return jsonify({"error": "Internal server error"}), 500
 
 

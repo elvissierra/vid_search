@@ -53,10 +53,18 @@ diarization roughly doubles per-video processing time.
 
 ## Running
 
+Three processes (see also [Procfile](Procfile)):
+
 ```bash
 python routes.py            # API on http://localhost:5000
+python worker.py            # transcription worker (loads ML models at startup)
 cd search_ui && npm run dev # UI on http://localhost:5173
 ```
+
+Transcription is asynchronous: submitting a new record returns `202` with a
+job id immediately; the worker picks the job up from the `jobs` table and the
+UI polls `/api/jobs/<id>` showing progress. If the worker isn't running, jobs
+just stay queued. Downloaded audio is deleted after each job.
 
 ## Environment variables
 
@@ -72,4 +80,5 @@ cd search_ui && npm run dev # UI on http://localhost:5173
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/records` | List previously ingested record labels |
-| POST | `/api/search` | Body `{url, record}`, query `?keyword=` — transcribes if the record is new, then searches. Returns `{video_id, results}` |
+| POST | `/api/search` | Body `{url, record, keyword}`. Existing record → `200` `{video_id, results: [{word, start, end, speaker}]}`. New record → job queued, `202` `{job_id, record}` (or `409` if the label is taken) |
+| GET | `/api/jobs/<job_id>` | Job status: `{id, status, progress, record, video_id, error, created_at, finished_at}` |

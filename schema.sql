@@ -30,6 +30,27 @@ ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS speaker TEXT;
 CREATE INDEX IF NOT EXISTS idx_transcripts_video ON transcripts (video_id);
 CREATE INDEX IF NOT EXISTS idx_transcripts_video_word ON transcripts (video_id, word);
 
+-- Transcription work queue. The API inserts a queued row and returns 202;
+-- worker.py claims rows with FOR UPDATE SKIP LOCKED and processes them.
+CREATE TABLE IF NOT EXISTS jobs (
+    id            TEXT PRIMARY KEY,
+    status        TEXT NOT NULL DEFAULT 'queued'
+                  CHECK (status IN ('queued', 'running', 'done', 'error')),
+    progress      INT  NOT NULL DEFAULT 0,
+    record        TEXT NOT NULL,
+    url           TEXT,
+    upload_path   TEXT,
+    language      TEXT,
+    video_id      TEXT,
+    error         TEXT,
+    audio_seconds DOUBLE PRECISION,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at    TIMESTAMPTZ,
+    finished_at   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at);
+
 -- ---------------------------------------------------------------------------
 -- Migrating a pre-existing database (transcripts table created by hand,
 -- before this file existed): run the statements below ONCE, then this file.

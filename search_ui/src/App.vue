@@ -27,7 +27,17 @@
           </button>
 
           <div v-if="isLoading" class="loading">
-            <p>Processing your search...</p>
+            <template v-if="jobProgress">
+              <p>Transcribing… {{ jobProgress.status }} ({{ jobProgress.progress }}%)</p>
+              <div class="progress-track">
+                <div class="progress-fill" :style="{ width: jobProgress.progress + '%' }"></div>
+              </div>
+            </template>
+            <p v-else>Processing your search...</p>
+          </div>
+
+          <div v-if="errorMessage" class="error-message">
+            <p>{{ errorMessage }}</p>
           </div>
         </div>
 
@@ -76,6 +86,8 @@ export default {
     const records = ref([]);
     const isLoading = ref(false);
     const searchPerformed = ref(false);
+    const errorMessage = ref('');
+    const jobProgress = ref(null);
 
     onMounted(async () => {
       try {
@@ -83,36 +95,65 @@ export default {
         records.value = response.data.records || [];
       } catch (error) {
         console.error('Error fetching records:', error);
+        errorMessage.value = 'Could not load previous records.';
       }
     });
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // Poll the job until it finishes; throws on job failure.
+    const waitForJob = async (jobId) => {
+      for (;;) {
+        const { data: job } = await axios.get(`/api/jobs/${jobId}`);
+        jobProgress.value = { status: job.status, progress: job.progress };
+        if (job.status === 'done') return;
+        if (job.status === 'error') {
+          throw new Error(job.error || 'Transcription failed.');
+        }
+        await sleep(2000);
+      }
+    };
 
     const keywordSearch = async () => {
       isLoading.value = true;
       searchPerformed.value = false;
+      errorMessage.value = '';
+      jobProgress.value = null;
       try {
         const recordToUse = selectedRecord.value || record.value;
 
-        const response = await axios.post('/api/search', {
+        let response = await axios.post('/api/search', {
           url: videoUrl.value,
           record: recordToUse,
-        }, {
-          params: {
-            keyword: keyword.value
-          }
+          keyword: keyword.value,
         });
+
+        if (response.status === 202) {
+          await waitForJob(response.data.job_id);
+          if (!records.value.includes(recordToUse)) {
+            records.value.push(recordToUse);
+          }
+          response = await axios.post('/api/search', {
+            record: recordToUse,
+            keyword: keyword.value,
+          });
+        }
 
         results.value = response.data.results || [];
         searchPerformed.value = true;
       } catch (error) {
         console.error('Error fetching search results:', error);
+        errorMessage.value =
+          error.response?.data?.error || error.message || 'Something went wrong.';
       } finally {
         isLoading.value = false;
+        jobProgress.value = null;
       }
     };
 
     const currentPage = ref('search');
 
-    return { videoUrl, record, selectedRecord, keyword, results, records, isLoading, keywordSearch, currentPage, searchPerformed };
+    return { videoUrl, record, selectedRecord, keyword, results, records, isLoading, keywordSearch, currentPage, searchPerformed, errorMessage, jobProgress };
   }
 };
 </script>
@@ -250,6 +291,30 @@ nav button.active {
   margin-top: 1rem;
   font-size: 1.1rem;
   color: #555;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  background-color: #fcfbfb;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: #28a745;
+  transition: width 0.5s ease;
+}
+
+.error-message {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background-color: #f8d7da;
+  color: #721c24;
+  border-radius: 8px;
+  font-size: 1rem;
 }
 
 .empty-state {
