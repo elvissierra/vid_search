@@ -1,0 +1,6 @@
+flask>=3.0
+flask-cors>=4.0
+psycopg2-binary>=2.9
+django-environ>=0.11
+openai-whisper>=20231117
+yt-dlp>=2024.10.7
