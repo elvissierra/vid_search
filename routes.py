@@ -5,6 +5,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import environ
 
+import exports
 from db import get_conn
 from vid_search import reserve_record
 
@@ -123,6 +124,33 @@ def get_job(job_id):
         return jsonify(dict(zip(keys, row))), 200
     except Exception:
         app.logger.exception("Failed to fetch job")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/export/<video_id>', methods=['GET'])
+def export_transcript(video_id):
+    """
+    Export a transcribed video's segments as srt, vtt, txt, or json.
+    """
+    fmt = request.args.get('format', 'txt').lower()
+    if fmt not in exports.FORMATS and fmt != 'json':
+        return jsonify({"error": "format must be one of: srt, vtt, txt, json"}), 400
+
+    try:
+        segments = exports.fetch_segments(video_id)
+        if not segments:
+            return jsonify({"error": "No transcript found for this video_id"}), 404
+
+        if fmt == 'json':
+            return jsonify(exports.to_json(segments, video_id)), 200
+
+        content_type, serialize = exports.FORMATS[fmt]
+        body = serialize(segments)
+        return app.response_class(body, mimetype=content_type, headers={
+            "Content-Disposition": f'attachment; filename="{video_id}.{fmt}"'
+        })
+    except Exception:
+        app.logger.exception("Export failed")
         return jsonify({"error": "Internal server error"}), 500
 
 

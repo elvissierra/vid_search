@@ -7,3 +7,4 @@ yt-dlp>=2024.10.7
 pyannote.audio>=3.1
 torch>=2.0
 torchaudio
+pytest>=8.0
