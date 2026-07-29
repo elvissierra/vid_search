@@ -73,6 +73,19 @@
               </span>
             </div>
 
+            <div v-if="searchPerformed && videoId" class="export-actions">
+              <span class="export-label">Export transcript</span>
+              <div class="export-links">
+                <a
+                  v-for="fmt in exportFormats"
+                  :key="fmt"
+                  :href="exportUrl(fmt)"
+                  class="export-link"
+                  download
+                >{{ fmt.toUpperCase() }}</a>
+              </div>
+            </div>
+
             <div v-if="!searchPerformed" class="placeholder-state">
               <p>Enter a video URL and record label — or pick a previous entry — then search for a keyword to jump straight to the moment it's spoken.</p>
             </div>
@@ -124,6 +137,8 @@ export default {
     const searchPerformed = ref(false);
     const errorMessage = ref('');
     const jobProgress = ref(null);
+    const videoId = ref(null);
+    const exportFormats = ['srt', 'vtt', 'txt', 'json'];
 
     onMounted(async () => {
       try {
@@ -155,6 +170,7 @@ export default {
       searchPerformed.value = false;
       errorMessage.value = '';
       jobProgress.value = null;
+      videoId.value = null;
       try {
         const recordToUse = selectedRecord.value || record.value;
 
@@ -176,6 +192,7 @@ export default {
         }
 
         results.value = response.data.results || [];
+        videoId.value = response.data.video_id || null;
         searchPerformed.value = true;
       } catch (error) {
         console.error('Error fetching search results:', error);
@@ -207,6 +224,11 @@ export default {
       return speakerPalette[hash % speakerPalette.length];
     };
 
+    const exportUrl = (fmt) => {
+      const base = axios.defaults.baseURL || '';
+      return `${base}/api/export/${videoId.value}?format=${fmt}`;
+    };
+
     return {
       videoUrl,
       record,
@@ -221,6 +243,9 @@ export default {
       errorMessage,
       jobProgress,
       speakerColor,
+      videoId,
+      exportFormats,
+      exportUrl,
     };
   }
 };
@@ -451,6 +476,45 @@ nav button.active {
   background: var(--color-success-soft);
   padding: 0.3rem 0.65rem;
   border-radius: 999px;
+}
+
+.export-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 1.25rem;
+  background: var(--color-surface-soft);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.export-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+}
+
+.export-links {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.export-link {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.export-link:hover {
+  background: var(--color-accent);
+  color: #fff;
+  opacity: 1;
 }
 
 .placeholder-state {
