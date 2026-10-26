@@ -1,5 +1,7 @@
--- vid_search schema — idempotent, safe to re-apply:
---   psql -d $DB_NAME -f schema.sql
+-- 001_baseline: the vid_search schema as of the async-queue and exports work.
+--
+-- Written to be idempotent (IF NOT EXISTS throughout) so it is safe to apply
+-- both to an empty database and to one whose tables already exist.
 
 -- One row per ingested video/episode. The primary key on record is what
 -- prevents two concurrent submissions of the same label from both
@@ -11,19 +13,21 @@ CREATE TABLE IF NOT EXISTS records (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- One row per transcribed word.
+-- One row per transcribed word. speaker is the pyannote diarization label;
+-- segment_index is the segment ordinal used to rebuild segments for exports.
 CREATE TABLE IF NOT EXISTS transcripts (
-    id           BIGSERIAL PRIMARY KEY,
-    video_id     TEXT NOT NULL,
-    record       TEXT NOT NULL,
-    segment_text TEXT,
-    word         TEXT,
-    start_time   DOUBLE PRECISION,
-    end_time     DOUBLE PRECISION
+    id            BIGSERIAL PRIMARY KEY,
+    video_id      TEXT NOT NULL,
+    record        TEXT NOT NULL,
+    segment_text  TEXT,
+    word          TEXT,
+    start_time    DOUBLE PRECISION,
+    end_time      DOUBLE PRECISION,
+    segment_index INT,
+    speaker       TEXT
 );
 
--- Speaker diarization (pyannote): label per word + segment ordinal for
--- reconstructing segments later (exports).
+-- Databases created before these two columns existed.
 ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS segment_index INT;
 ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS speaker TEXT;
 
@@ -50,13 +54,3 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at);
-
--- ---------------------------------------------------------------------------
--- Migrating a pre-existing database (transcripts table created by hand,
--- before this file existed): run the statements below ONCE, then this file.
---
--- ALTER TABLE transcripts ADD COLUMN id BIGSERIAL PRIMARY KEY;
--- INSERT INTO records (record, video_id)
---     SELECT DISTINCT record, video_id FROM transcripts
---     ON CONFLICT (record) DO NOTHING;
--- ---------------------------------------------------------------------------

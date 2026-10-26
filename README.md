@@ -23,9 +23,8 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 createdb vid_search
-psql -d vid_search -f schema.sql        # idempotent, re-run any time
-
 cp .env.example .env                     # then fill in DB credentials
+python migrate.py                        # create/upgrade the schema, re-run any time
 
 # Frontend
 cd search_ui
@@ -33,8 +32,15 @@ npm install
 cp .env.example .env
 ```
 
-If you have a database from before `schema.sql` existed, see the migration
-comments at the bottom of [schema.sql](schema.sql).
+### Database migrations
+
+The schema lives in [migrations/](migrations/) as numbered SQL files
+(`001_baseline.sql`, `002_….sql`, …). `python migrate.py` applies the ones not
+yet recorded in the `schema_migrations` table, each in its own transaction, so
+it is safe to run on a fresh database, an existing one, or repeatedly.
+
+To change the schema, add the next numbered file. Never edit one that has
+already been applied.
 
 ### Speaker diarization (one-time setup)
 
