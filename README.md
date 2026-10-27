@@ -88,3 +88,14 @@ just stay queued. Downloaded audio is deleted after each job.
 | GET | `/api/records` | List previously ingested record labels |
 | POST | `/api/search` | Body `{url, record, keyword}`. Existing record → `200` `{video_id, results: [{word, start, end, speaker}]}`. New record → job queued, `202` `{job_id, record}` (or `409` if the label is taken) |
 | GET | `/api/jobs/<job_id>` | Job status: `{id, status, progress, record, video_id, error, created_at, finished_at}` |
+
+## Tests
+
+The suite includes db-backed tests for the job queue and record reservation, which need a real Postgres. Point the `DB_*` variables at a scratch database, then:
+
+```
+python migrate.py
+pytest
+```
+
+Without `DB_NAME` set, the db-backed tests are skipped.
