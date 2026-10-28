@@ -1,0 +1,7 @@
+# Test-only subset of requirements.txt. The heavy ML packages (whisper, torch,
+# pyannote, yt-dlp) are imported lazily and never touched by the test suite.
+flask>=3.0
+flask-cors>=4.0
+psycopg2-binary>=2.9
+django-environ>=0.11
+pytest>=8.0

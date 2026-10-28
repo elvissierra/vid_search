@@ -98,4 +98,6 @@ python migrate.py
 pytest
 ```
 
-Without `DB_NAME` set, the db-backed tests are skipped.
+Without `DB_NAME` set, the db-backed tests are skipped. The tests only need the light dependencies in `requirements-ci.txt`; the ML packages are imported lazily and are not required.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `migrate.py` and `pytest` against a Postgres 16 service with `DB_NAME` set, so the db-backed tests run rather than skip, and builds the UI with `npm run build`.
