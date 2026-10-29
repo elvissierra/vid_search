@@ -1,0 +1,11 @@
+.git
+.github
+.env
+.vs
+.vscode
+__pycache__
+*.pyc
+venv
+video
+search_ui
+tests

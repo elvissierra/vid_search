@@ -72,6 +72,16 @@ job id immediately; the worker picks the job up from the `jobs` table and the
 UI polls `/api/jobs/<id>` showing progress. If the worker isn't running, jobs
 just stay queued. Downloaded audio is deleted after each job.
 
+### Docker
+
+One command runs the whole stack (Postgres, migrations, API, worker, UI):
+
+```bash
+docker compose up --build
+```
+
+The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-shot `migrate` service applies `migrations/` before the API and worker start. The backend image installs the full `requirements.txt` (CPU-only torch) plus ffmpeg; Whisper and pyannote checkpoints are cached in the `model_cache` volume and the database in `pgdata`. Set `HF_TOKEN` (shell or a compose `.env`) for diarization. Other overrides: `DB_PASSWORD`, `API_PORT`, `UI_PORT`, `VITE_API_URL` (baked into the UI at build time, so rebuild after changing it).
+
 ## Environment variables
 
 | File | Variable | Purpose |

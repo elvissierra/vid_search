@@ -1,0 +1,69 @@
+# Whole stack: docker compose up --build
+#   UI  http://localhost:8080    API  http://localhost:5000
+# Optional overrides (shell or a compose .env file): DB_PASSWORD, HF_TOKEN,
+# API_PORT, UI_PORT, VITE_API_URL.
+x-backend: &backend
+  build: .
+  environment:
+    DB_NAME: vid_search
+    DB_USER: postgres
+    DB_PASSWORD: ${DB_PASSWORD:-vid_search}
+    DB_HOST: db
+    DB_PORT: "5432"
+    CORS_ORIGINS: http://localhost:${UI_PORT:-8080}
+    HF_TOKEN: ${HF_TOKEN:-}
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: vid_search
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-vid_search}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vid_search"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *backend
+    command: ["python", "migrate.py"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    ports:
+      - "${API_PORT:-5000}:5000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *backend
+    command: ["python", "worker.py"]
+    volumes:
+      # Whisper and pyannote checkpoints download on first use; keep them.
+      - model_cache:/root/.cache
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  ui:
+    build:
+      context: search_ui
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:${API_PORT:-5000}}
+    ports:
+      - "${UI_PORT:-8080}:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  model_cache:
