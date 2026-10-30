@@ -7,6 +7,7 @@ import environ
 
 import exports
 from db import get_conn
+from languages import normalize_language
 from vid_search import reserve_record
 
 env = environ.Env()
@@ -40,11 +41,20 @@ def transcribe_search():
     Keyword search within a record. New records are queued for the worker:
     the label is reserved, a job row is inserted, and a 202 with the job id
     is returned for the client to poll via /api/jobs/<job_id>.
+
+    An optional `language` (whisper code or name, e.g. "es" or "Spanish";
+    omitted or "auto" means detect) is validated up front and stored on the
+    job. It only matters when a new record is queued.
     """
     data = request.get_json()
     video_url = data.get('url')
     record = data.get('record')
     keyword = data.get('keyword')
+
+    try:
+        language = normalize_language(data.get('language'))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     try:
         with get_conn() as conn:
@@ -65,10 +75,10 @@ def transcribe_search():
                 with conn.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO jobs (id, record, url, video_id)
-                        VALUES (%s, %s, %s, %s);
+                        INSERT INTO jobs (id, record, url, video_id, language)
+                        VALUES (%s, %s, %s, %s, %s);
                         """,
-                        (job_id, record, video_url, video_id)
+                        (job_id, record, video_url, video_id, language)
                     )
             return jsonify({"job_id": job_id, "record": record}), 202
 
