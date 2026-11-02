@@ -31,6 +31,18 @@
                 <option v-for="(rec, index) in records" :key="index" :value="rec">{{ rec }}</option>
               </select>
 
+              <label class="field-label" for="language">Spoken language</label>
+              <select
+                id="language"
+                v-model="language"
+                class="record-select"
+                :disabled="!!selectedRecord"
+              >
+                <option value="auto">Auto-detect</option>
+                <option v-for="[code, label] in languages" :key="code" :value="code">{{ label }}</option>
+              </select>
+              <p class="field-hint">Applies to new records only.</p>
+
               <label class="field-label">Keyword</label>
               <input v-model="keyword" placeholder="Word or phrase to find" class="input-field" />
             </div>
@@ -124,6 +136,7 @@
 <script>
 import axios from 'axios';
 import { ref, onMounted } from 'vue';
+import { LANGUAGES } from './languages';
 
 export default {
   setup() {
@@ -131,6 +144,8 @@ export default {
     const record = ref('');
     const selectedRecord = ref('');
     const keyword = ref('');
+    const language = ref('auto');
+    const languages = LANGUAGES;
     const results = ref([]);
     const records = ref([]);
     const isLoading = ref(false);
@@ -178,6 +193,7 @@ export default {
           url: videoUrl.value,
           record: recordToUse,
           keyword: keyword.value,
+          language: language.value,
         });
 
         if (response.status === 202) {
@@ -234,6 +250,8 @@ export default {
       record,
       selectedRecord,
       keyword,
+      language,
+      languages,
       results,
       records,
       isLoading,
@@ -430,6 +448,12 @@ nav button.active {
 .status-title {
   font-weight: 600;
   margin-bottom: 0.1rem;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin-top: 0.25rem;
 }
 
 .status-sub {
