@@ -1,7 +1,7 @@
 # Whole stack: docker compose up --build
 #   UI  http://localhost:8080    API  http://localhost:5000
 # Optional overrides (shell or a compose .env file): DB_PASSWORD, HF_TOKEN,
-# API_PORT, UI_PORT, VITE_API_URL.
+# API_PORT, UI_PORT, VITE_API_URL, MAX_UPLOAD_MB.
 x-backend: &backend
   build: .
   environment:
@@ -12,6 +12,11 @@ x-backend: &backend
     DB_PORT: "5432"
     CORS_ORIGINS: http://localhost:${UI_PORT:-8080}
     HF_TOKEN: ${HF_TOKEN:-}
+    UPLOAD_DIR: /data/uploads
+    MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+  volumes:
+    # Uploads are written by the api and consumed (then deleted) by the worker.
+    - uploads:/data/uploads
 
 services:
   db:
@@ -49,6 +54,7 @@ services:
     command: ["python", "worker.py"]
     volumes:
       # Whisper and pyannote checkpoints download on first use; keep them.
+      - uploads:/data/uploads
       - model_cache:/root/.cache
     depends_on:
       migrate:
@@ -66,4 +72,5 @@ services:
 
 volumes:
   pgdata:
+  uploads:
   model_cache:

@@ -1,3 +1,4 @@
+import os
 import re
 import uuid
 
@@ -8,7 +9,8 @@ import environ
 import exports
 from db import get_conn
 from languages import normalize_language
-from vid_search import reserve_record
+import uploads
+from vid_search import reserve_record, release_record
 
 env = environ.Env()
 environ.Env.read_env()
@@ -16,6 +18,13 @@ environ.Env.read_env()
 cors_origins = env("CORS_ORIGINS").split(",")
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": cors_origins}})
+app.config["MAX_CONTENT_LENGTH"] = uploads.max_upload_bytes()
+
+
+@app.errorhandler(413)
+def too_large(_e):
+    limit_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+    return jsonify({"error": f"File too large; limit is {limit_mb} MB"}), 413
 
 
 @app.route('/api/records', methods=['GET'])
@@ -107,6 +116,60 @@ def transcribe_search():
 
     except Exception:
         app.logger.exception("Transcription or search failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/upload', methods=['POST'])
+def upload_media():
+    """
+    Queue an uploaded audio/video file for transcription. Multipart form with
+    `file`, `record` and an optional `language`. The file is validated
+    (extension allow-list, MAX_UPLOAD_MB), stored under a server-generated
+    name, and queued with its path in jobs.upload_path; the worker deletes it
+    after the job. Returns 202 with the job id, like /api/search.
+    """
+    record = (request.form.get('record') or '').strip()
+    if not record:
+        return jsonify({"error": "Record is required"}), 400
+
+    try:
+        language = normalize_language(request.form.get('language'))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    path = None
+    video_id = None
+    try:
+        path = uploads.save_upload(request.files.get('file'))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        app.logger.exception("Failed to store upload")
+        return jsonify({"error": "Internal server error"}), 500
+
+    try:
+        video_id, is_new = reserve_record(record, source_url=None)
+        if not is_new:
+            os.remove(path)
+            return jsonify({"error": "Record already exists or is being processed"}), 409
+
+        job_id = str(uuid.uuid4())
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO jobs (id, record, url, video_id, language, upload_path)
+                    VALUES (%s, %s, NULL, %s, %s, %s);
+                    """,
+                    (job_id, record, video_id, language, path)
+                )
+        return jsonify({"job_id": job_id, "record": record}), 202
+    except Exception:
+        app.logger.exception("Failed to queue upload")
+        if os.path.exists(path):
+            os.remove(path)
+        if video_id:
+            release_record(record, video_id)
         return jsonify({"error": "Internal server error"}), 500
 
 
