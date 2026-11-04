@@ -72,6 +72,8 @@ job id immediately; the worker picks the job up from the `jobs` table and the
 UI polls `/api/jobs/<id>` showing progress. If the worker isn't running, jobs
 just stay queued. Downloaded and uploaded audio is deleted after each job.
 
+In the UI, drop an audio or video file onto the upload box (or click it to browse) instead of entering a URL. The file is posted to `/api/upload` with a progress bar, then the job is polled like any other. If no record label is given, the file name is used. The accepted types mirror the backend allow-list; the size limit is enforced by the API (`MAX_UPLOAD_MB`).
+
 ### Docker
 
 One command runs the whole stack (Postgres, migrations, API, worker, UI):

@@ -25,6 +25,41 @@
               <label class="field-label">New record label</label>
               <input v-model="record" placeholder="Name this recording" class="input-field" />
 
+              <label class="field-label">Or upload a file</label>
+              <div
+                class="dropzone"
+                :class="{ dragging: isDragging, disabled: !!selectedRecord || isLoading }"
+                @dragover.prevent="onDragOver"
+                @dragleave.prevent="isDragging = false"
+                @drop.prevent="onDrop"
+                @click="openPicker"
+                @keydown.enter.prevent="openPicker"
+                @keydown.space.prevent="openPicker"
+                role="button"
+                tabindex="0"
+                :aria-disabled="!!selectedRecord || isLoading"
+              >
+                <input
+                  ref="fileInput"
+                  type="file"
+                  class="file-input"
+                  :accept="uploadAccept"
+                  @change="onFilePicked"
+                />
+                <template v-if="file">
+                  <span class="dropzone-name">{{ file.name }}</span>
+                  <span class="dropzone-meta">{{ formatBytes(file.size) }}</span>
+                  <button
+                    type="button"
+                    class="dropzone-clear"
+                    :disabled="isLoading"
+                    @click.stop="clearFile"
+                  >Remove</button>
+                </template>
+                <span v-else class="dropzone-meta">Drop an audio or video file here, or click to browse</span>
+              </div>
+              <p class="field-hint">Used instead of the URL when a file is chosen.</p>
+
               <label class="field-label">Or choose a previous record</label>
               <select v-model="selectedRecord" class="record-select">
                 <option disabled value="">Select a previous record</option>
@@ -49,7 +84,7 @@
 
             <button
               @click="keywordSearch"
-              :disabled="isLoading || (!videoUrl && !record && !selectedRecord)"
+              :disabled="isLoading || (!videoUrl && !record && !selectedRecord && !file)"
               class="search-button"
             >
               <span v-if="!isLoading">Search</span>
@@ -58,7 +93,14 @@
 
             <transition name="fade">
               <div v-if="isLoading" class="status-card status-info">
-                <template v-if="jobProgress">
+                <template v-if="uploadProgress !== null">
+                  <p class="status-title">Uploading {{ file?.name }}</p>
+                  <div class="progress-track">
+                    <div class="progress-fill" :style="{ width: uploadProgress + '%' }"></div>
+                  </div>
+                  <p class="status-sub">{{ uploadProgress }}% uploaded</p>
+                </template>
+                <template v-else-if="jobProgress">
                   <p class="status-title">Transcribing {{ jobProgress.status }}</p>
                   <div class="progress-track">
                     <div class="progress-fill" :style="{ width: jobProgress.progress + '%' }"></div>
@@ -124,7 +166,7 @@
           <h2 class="panel-title">About</h2>
           <p>
             This application allows users to search within videos by keyword and navigate to specific timestamps where a keyword is mentioned.
-            Simply provide a URL to the video, enter a record label, or select a previous entry, and enter a keyword.
+            Provide a URL to the video, or drag and drop an audio or video file, enter a record label (optional for uploads), or select a previous entry, and enter a keyword.
             All relevant results will be displayed with their corresponding start and end times.
           </p>
         </section>
@@ -137,6 +179,12 @@
 import axios from 'axios';
 import { ref, onMounted } from 'vue';
 import { LANGUAGES } from './languages';
+import {
+  UPLOAD_ACCEPT,
+  isAllowedUpload,
+  labelFromFilename,
+  formatBytes,
+} from './uploadTypes';
 
 export default {
   setup() {
@@ -154,6 +202,37 @@ export default {
     const jobProgress = ref(null);
     const videoId = ref(null);
     const exportFormats = ['srt', 'vtt', 'txt', 'json'];
+    const uploadAccept = UPLOAD_ACCEPT;
+    const file = ref(null);
+    const fileInput = ref(null);
+    const isDragging = ref(false);
+    const uploadProgress = ref(null);
+
+    const setFile = (picked) => {
+      if (!picked) return;
+      if (!isAllowedUpload(picked.name)) {
+        errorMessage.value = 'Unsupported file type. Choose an audio or video file.';
+        return;
+      }
+      errorMessage.value = '';
+      file.value = picked;
+    };
+    const clearFile = () => {
+      file.value = null;
+      if (fileInput.value) fileInput.value.value = '';
+    };
+    const uploadBlocked = () => isLoading.value || !!selectedRecord.value;
+    const openPicker = () => {
+      if (!uploadBlocked()) fileInput.value?.click();
+    };
+    const onFilePicked = (event) => setFile(event.target.files?.[0]);
+    const onDragOver = () => {
+      if (!uploadBlocked()) isDragging.value = true;
+    };
+    const onDrop = (event) => {
+      isDragging.value = false;
+      if (!uploadBlocked()) setFile(event.dataTransfer?.files?.[0]);
+    };
 
     onMounted(async () => {
       try {
@@ -185,22 +264,43 @@ export default {
       searchPerformed.value = false;
       errorMessage.value = '';
       jobProgress.value = null;
+      uploadProgress.value = null;
       videoId.value = null;
       try {
-        const recordToUse = selectedRecord.value || record.value;
+        const uploading = !!file.value && !selectedRecord.value;
+        const recordToUse =
+          selectedRecord.value ||
+          record.value ||
+          (uploading ? labelFromFilename(file.value.name) : '');
 
-        let response = await axios.post('/api/search', {
-          url: videoUrl.value,
-          record: recordToUse,
-          keyword: keyword.value,
-          language: language.value,
-        });
+        let response;
+        if (uploading) {
+          const form = new FormData();
+          form.append('file', file.value);
+          form.append('record', recordToUse);
+          form.append('language', language.value);
+          uploadProgress.value = 0;
+          response = await axios.post('/api/upload', form, {
+            onUploadProgress: (e) => {
+              if (e.total) uploadProgress.value = Math.round((e.loaded / e.total) * 100);
+            },
+          });
+          uploadProgress.value = null;
+        } else {
+          response = await axios.post('/api/search', {
+            url: videoUrl.value,
+            record: recordToUse,
+            keyword: keyword.value,
+            language: language.value,
+          });
+        }
 
         if (response.status === 202) {
           await waitForJob(response.data.job_id);
           if (!records.value.includes(recordToUse)) {
             records.value.push(recordToUse);
           }
+          if (uploading) clearFile();
           response = await axios.post('/api/search', {
             record: recordToUse,
             keyword: keyword.value,
@@ -217,6 +317,7 @@ export default {
       } finally {
         isLoading.value = false;
         jobProgress.value = null;
+        uploadProgress.value = null;
       }
     };
 
@@ -252,6 +353,17 @@ export default {
       keyword,
       language,
       languages,
+      file,
+      fileInput,
+      isDragging,
+      uploadProgress,
+      uploadAccept,
+      formatBytes,
+      openPicker,
+      onFilePicked,
+      onDragOver,
+      onDrop,
+      clearFile,
       results,
       records,
       isLoading,
@@ -399,6 +511,59 @@ nav button.active {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 4px var(--color-accent-soft);
+}
+
+.file-input {
+  display: none;
+}
+
+.dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 1rem;
+  text-align: center;
+  border: 1.5px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-soft);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.dropzone:hover:not(.disabled),
+.dropzone:focus-visible,
+.dropzone.dragging {
+  outline: none;
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.dropzone.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dropzone-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.dropzone-meta {
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+}
+
+.dropzone-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-error);
 }
 
 .search-button {
