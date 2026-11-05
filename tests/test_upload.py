@@ -1,6 +1,7 @@
 """POST /api/upload: validation, size limit, and what gets queued."""
 import io
 import os
+import uuid
 
 import pytest
 
@@ -84,12 +85,130 @@ def test_duplicate_record_is_409_and_file_is_discarded(client, db, tmp_path):
     assert len(rows(db, "SELECT 1 FROM jobs")) == 1
 
 
-def test_traversal_in_filename_cannot_choose_the_path(client, db, tmp_path):
-    resp = post(client, name="../../evil.mp3")
+@pytest.mark.parametrize("name", [
+    "../../evil.mp3",
+    "..\\..\\evil.mp3",
+    "/etc/cron.d/evil.mp3",
+    "C:\\Windows\\evil.mp3",
+    "a/b/c/evil.mp3",
+    "sp ace; rm -rf.mp3",
+    "t\u00e9st\u202e3pm.mp3",
+    ("x" * 300) + ".mp3",
+])
+def test_client_filename_cannot_choose_the_path(client, db, tmp_path, name):
+    resp = post(client, name=name)
     assert resp.status_code == 202
     (path,), = rows(db, "SELECT upload_path FROM jobs")
     assert os.path.dirname(path) == str(tmp_path / "up")
-    assert not (tmp_path / "evil.mp3").exists()
+    stored = os.path.basename(path)
+    assert uuid.UUID(os.path.splitext(stored)[0])
+    assert stored.endswith(".mp3")
+    # nothing was written anywhere but the upload directory
+    assert stored_files(tmp_path) == [stored]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["up"]
+
+
+def test_extension_is_lowercased_and_only_the_last_one_counts(client, db, tmp_path):
+    assert post(client, name="clip.tar.MP4").status_code == 202
+    (path,), = rows(db, "SELECT upload_path FROM jobs")
+    assert path.endswith(".mp4")
+    assert ".tar" not in os.path.basename(path)
+
+
+def test_failed_job_insert_removes_file_and_releases_record(client, db, tmp_path, monkeypatch):
+    import routes
+
+    real_get_conn = routes.get_conn
+    calls = {"n": 0}
+
+    def failing_get_conn():
+        calls["n"] += 1
+        raise RuntimeError("db down")
+
+    # reserve_record uses vid_search.get_conn, so only the job insert fails.
+    monkeypatch.setattr(routes, "get_conn", failing_get_conn)
+    resp = post(client)
+    assert resp.status_code == 500
+    assert resp.get_json() == {"error": "Internal server error"}
+    assert calls["n"] == 1
+    monkeypatch.setattr(routes, "get_conn", real_get_conn)
+
+    assert stored_files(tmp_path) == []
+    assert rows(db, "SELECT 1 FROM records") == []
+    assert rows(db, "SELECT 1 FROM jobs") == []
+    # the label is free again, so a retry succeeds
+    assert post(client).status_code == 202
+
+
+def test_failed_reservation_removes_file(client, db, tmp_path, monkeypatch):
+    import routes
+
+    def boom(record, source_url=None):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(routes, "reserve_record", boom)
+    resp = post(client)
+    assert resp.status_code == 500
+    assert stored_files(tmp_path) == []
+    assert rows(db, "SELECT 1 FROM jobs") == []
+
+
+def test_failed_save_leaves_nothing_behind(client, db, tmp_path, monkeypatch):
+    def boom(_file_storage):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(uploads, "save_upload", boom)
+    resp = post(client)
+    assert resp.status_code == 500
+    assert rows(db, "SELECT 1 FROM records") == []
+    assert rows(db, "SELECT 1 FROM jobs") == []
+
+
+def claim_uploaded_job(db):
+    import worker
+    job = worker.claim_job()
+    assert job is not None
+    return worker, job
+
+
+def test_worker_deletes_upload_after_success(client, db, tmp_path, monkeypatch):
+    import vid_search
+    assert post(client).status_code == 202
+    (path,), = rows(db, "SELECT upload_path FROM jobs")
+    seen = {}
+
+    def fake_process(audio_file, record, video_id, language=None, progress_cb=None):
+        seen["file"] = audio_file
+        assert os.path.exists(audio_file)
+
+    monkeypatch.setattr(vid_search, "process_audio", fake_process)
+    worker, job = claim_uploaded_job(db)
+    worker.process_job(job)
+
+    assert seen["file"] == path
+    assert not os.path.exists(path)
+    (status,), = rows(db, "SELECT status FROM jobs")
+    assert status == "done"
+
+
+def test_worker_deletes_upload_and_frees_record_after_failure(client, db, tmp_path, monkeypatch):
+    import vid_search
+    assert post(client).status_code == 202
+    (path,), = rows(db, "SELECT upload_path FROM jobs")
+
+    def failing_process(*args, **kwargs):
+        raise RuntimeError("whisper exploded")
+
+    monkeypatch.setattr(vid_search, "process_audio", failing_process)
+    worker, job = claim_uploaded_job(db)
+    worker.process_job(job)
+
+    assert not os.path.exists(path)
+    (status, error), = rows(db, "SELECT status, error FROM jobs")
+    assert status == "error" and "whisper exploded" in error
+    assert rows(db, "SELECT 1 FROM records") == []
+    # the label can be uploaded again
+    assert post(client).status_code == 202
 
 
 def test_extension_helper():
