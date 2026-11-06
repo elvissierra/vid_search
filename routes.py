@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import environ
 
+import auth
 import exports
 from db import get_conn
 from languages import normalize_language
@@ -25,6 +26,78 @@ app.config["MAX_CONTENT_LENGTH"] = uploads.max_upload_bytes()
 def too_large(_e):
     limit_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
     return jsonify({"error": f"File too large; limit is {limit_mb} MB"}), 413
+
+
+@app.route('/api/signup', methods=['POST'])
+def signup():
+    """
+    Create an account. Body `{email, password}`. Returns 201 with the user
+    and a bearer token (send as `Authorization: Bearer <token>`); 400 for an
+    invalid email/password, 409 if the email is already registered.
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        email = auth.normalize_email(data.get('email'))
+        password = auth.validate_password(data.get('password'))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        user = auth.create_user(email, password)
+        if not user:
+            return jsonify({"error": "Email already registered"}), 409
+        return jsonify({"user": user, "token": auth.create_session(user["id"])}), 201
+    except Exception:
+        app.logger.exception("Signup failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    """
+    Body `{email, password}`. Returns 200 with the user and a new bearer
+    token, or 401 for bad credentials (the same answer for an unknown email).
+    """
+    data = request.get_json(silent=True) or {}
+    email, password = data.get('email'), data.get('password')
+    if not isinstance(email, str) or not isinstance(password, str):
+        return jsonify({"error": "Invalid email or password"}), 401
+
+    try:
+        user = auth.authenticate(email.strip().lower(), password[:auth.MAX_PASSWORD])
+        if not user:
+            return jsonify({"error": "Invalid email or password"}), 401
+        return jsonify({"user": user, "token": auth.create_session(user["id"])}), 200
+    except Exception:
+        app.logger.exception("Login failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    """Revoke the bearer token used for this request. 204, or 401 if not logged in."""
+    token = auth.bearer_token(request.headers.get('Authorization'))
+    try:
+        if not auth.user_for_token(token):
+            return jsonify({"error": "Authentication required"}), 401
+        auth.revoke_token(token)
+        return '', 204
+    except Exception:
+        app.logger.exception("Logout failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/me', methods=['GET'])
+def me():
+    """The logged-in user, or 401."""
+    try:
+        user = auth.user_for_token(auth.bearer_token(request.headers.get('Authorization')))
+        if not user:
+            return jsonify({"error": "Authentication required"}), 401
+        return jsonify({"user": user}), 200
+    except Exception:
+        app.logger.exception("Failed to load current user")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route('/api/records', methods=['GET'])

@@ -102,6 +102,10 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | GET | `/api/records` | List previously ingested record labels |
 | POST | `/api/search` | Body `{url, record, keyword, language?}`. `language` is a whisper code or name (`es`, `Spanish`); omitted or `auto` detects it, anything else unsupported is `400`. It applies when a new record is queued. Existing record → `200` `{video_id, results: [{word, start, end, speaker}]}`. New record → job queued, `202` `{job_id, record}` (or `409` if the label is taken) |
 | POST | `/api/upload` | Multipart form: `file` (audio/video: mp3, wav, m4a, aac, flac, ogg, opus, wma, mp4, mov, mkv, webm, avi, m4v), `record`, optional `language` (same rules as `/api/search`). Stored under a server-generated name in `UPLOAD_DIR` and queued via `jobs.upload_path`; the worker deletes it after the job. `202` `{job_id, record}`; `400` bad type/missing file/record/language; `409` label taken; `413` over `MAX_UPLOAD_MB` |
+| POST | `/api/signup` | Body `{email, password}` (password 8-128 characters; email is lowercased). `201` `{user: {id, email}, token}`; `400` invalid email/password; `409` email already registered. Send the token as `Authorization: Bearer <token>`. Passwords are stored as scrypt hashes and only the sha256 of each token is stored; sessions last 30 days |
+| POST | `/api/login` | Body `{email, password}`. `200` `{user, token}` (a new session each time); `401` for bad credentials, with the same answer for an unknown email |
+| POST | `/api/logout` | Revokes the bearer token used. `204`; `401` if not logged in |
+| GET | `/api/me` | The logged-in user `{user: {id, email}}`; `401` without a valid token |
 | GET | `/api/jobs/<job_id>` | Job status: `{id, status, progress, record, video_id, error, created_at, finished_at}` |
 
 ## Tests
