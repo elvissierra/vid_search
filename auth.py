@@ -136,6 +136,26 @@ def revoke_token(token):
             cursor.execute("DELETE FROM sessions WHERE token_hash = %s;", (_token_hash(token),))
 
 
+class AuthRequired(Exception):
+    """The request carried credentials that are not valid (HTTP 401)."""
+
+
+def viewer_id(header):
+    """Who is asking: a user id, or None for an anonymous request.
+
+    No Authorization header is anonymous, and anonymous requests only see
+    rows that have no owner. A header that does not resolve to a live
+    session raises AuthRequired rather than silently downgrading to
+    anonymous, so an expired token cannot show the wrong data set.
+    """
+    if header is None:
+        return None
+    user = user_for_token(bearer_token(header))
+    if not user:
+        raise AuthRequired()
+    return user["id"]
+
+
 def bearer_token(header):
     """The token from an `Authorization: Bearer <token>` header value, or None."""
     if not header:

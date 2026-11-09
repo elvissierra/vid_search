@@ -28,6 +28,20 @@ def too_large(_e):
     return jsonify({"error": f"File too large; limit is {limit_mb} MB"}), 413
 
 
+@app.errorhandler(auth.AuthRequired)
+def auth_required(_e):
+    return jsonify({"error": "Authentication required"}), 401
+
+
+def viewer():
+    """User id for this request (None = anonymous); raises AuthRequired.
+
+    Call it before a handler's try block so the 401 is not caught by the
+    handler's generic 500.
+    """
+    return auth.viewer_id(request.headers.get('Authorization'))
+
+
 @app.route('/api/signup', methods=['POST'])
 def signup():
     """
@@ -103,12 +117,16 @@ def me():
 @app.route('/api/records', methods=['GET'])
 def get_records():
     """
-    Retrieve all previous entries for search
+    Retrieve the viewer's previous entries for search
     """
+    user_id = viewer()
     try:
         with get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT record FROM records ORDER BY record;")
+                cursor.execute(
+                    "SELECT record FROM records WHERE user_id IS NOT DISTINCT FROM %s ORDER BY record;",
+                    (user_id,)
+                )
                 records = cursor.fetchall()
         record_list = [record[0] for record in records]
         return jsonify({"records": record_list}), 200
@@ -127,7 +145,11 @@ def transcribe_search():
     An optional `language` (whisper code or name, e.g. "es" or "Spanish";
     omitted or "auto" means detect) is validated up front and stored on the
     job. It only matters when a new record is queued.
+
+    Records are scoped to the logged-in user (bearer token); without a token
+    only unowned records are visible. Labels are unique per owner.
     """
+    user_id = viewer()
     data = request.get_json()
     video_url = data.get('url')
     record = data.get('record')
@@ -141,14 +163,17 @@ def transcribe_search():
     try:
         with get_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT video_id FROM records WHERE record = %s;", (record,))
+                cursor.execute(
+                    "SELECT video_id FROM records WHERE record = %s AND user_id IS NOT DISTINCT FROM %s;",
+                    (record, user_id)
+                )
                 existing_record = cursor.fetchone()
 
         if not existing_record:
             if not video_url:
                 return jsonify({"error": "Record or video URL is required"}), 400
 
-            video_id, is_new = reserve_record(record, source_url=video_url)
+            video_id, is_new = reserve_record(record, source_url=video_url, user_id=user_id)
             if not is_new:
                 return jsonify({"error": "Record already exists or is being processed"}), 409
 
@@ -157,10 +182,10 @@ def transcribe_search():
                 with conn.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO jobs (id, record, url, video_id, language)
-                        VALUES (%s, %s, %s, %s, %s);
+                        INSERT INTO jobs (id, record, url, video_id, language, user_id)
+                        VALUES (%s, %s, %s, %s, %s, %s);
                         """,
-                        (job_id, record, video_url, video_id, language)
+                        (job_id, record, video_url, video_id, language, user_id)
                     )
             return jsonify({"job_id": job_id, "record": record}), 202
 
@@ -199,8 +224,10 @@ def upload_media():
     `file`, `record` and an optional `language`. The file is validated
     (extension allow-list, MAX_UPLOAD_MB), stored under a server-generated
     name, and queued with its path in jobs.upload_path; the worker deletes it
-    after the job. Returns 202 with the job id, like /api/search.
+    after the job. Returns 202 with the job id, like /api/search. The record
+    belongs to the logged-in user (see /api/search).
     """
+    user_id = viewer()
     record = (request.form.get('record') or '').strip()
     if not record:
         return jsonify({"error": "Record is required"}), 400
@@ -221,7 +248,7 @@ def upload_media():
         return jsonify({"error": "Internal server error"}), 500
 
     try:
-        video_id, is_new = reserve_record(record, source_url=None)
+        video_id, is_new = reserve_record(record, source_url=None, user_id=user_id)
         if not is_new:
             os.remove(path)
             return jsonify({"error": "Record already exists or is being processed"}), 409
@@ -231,10 +258,10 @@ def upload_media():
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO jobs (id, record, url, video_id, language, upload_path)
-                    VALUES (%s, %s, NULL, %s, %s, %s);
+                    INSERT INTO jobs (id, record, url, video_id, language, upload_path, user_id)
+                    VALUES (%s, %s, NULL, %s, %s, %s, %s);
                     """,
-                    (job_id, record, video_id, language, path)
+                    (job_id, record, video_id, language, path, user_id)
                 )
         return jsonify({"job_id": job_id, "record": record}), 202
     except Exception:
@@ -249,17 +276,19 @@ def upload_media():
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):
     """
-    Poll a transcription job's status and progress.
+    Poll a transcription job's status and progress. Jobs of other owners
+    are 404, the same as a job that does not exist.
     """
+    user_id = viewer()
     try:
         with get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
                     SELECT id, status, progress, record, video_id, error, created_at, finished_at
-                    FROM jobs WHERE id = %s;
+                    FROM jobs WHERE id = %s AND user_id IS NOT DISTINCT FROM %s;
                     """,
-                    (job_id,)
+                    (job_id, user_id)
                 )
                 row = cursor.fetchone()
 
@@ -276,14 +305,23 @@ def get_job(job_id):
 @app.route('/api/export/<video_id>', methods=['GET'])
 def export_transcript(video_id):
     """
-    Export a transcribed video's segments as srt, vtt, txt, or json.
+    Export a transcribed video's segments as srt, vtt, txt, or json. Only
+    the owner's records can be exported; others are 404.
     """
+    user_id = viewer()
     fmt = request.args.get('format', 'txt').lower()
     if fmt not in exports.FORMATS and fmt != 'json':
         return jsonify({"error": "format must be one of: srt, vtt, txt, json"}), 400
 
     try:
-        segments = exports.fetch_segments(video_id)
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM records WHERE video_id = %s AND user_id IS NOT DISTINCT FROM %s;",
+                    (video_id, user_id)
+                )
+                owned = cursor.fetchone()
+        segments = exports.fetch_segments(video_id) if owned else []
         if not segments:
             return jsonify({"error": "No transcript found for this video_id"}), 404
 

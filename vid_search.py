@@ -47,29 +47,33 @@ def download_video_audio(url):
          raise
 
 
-def reserve_record(record, source_url=None):
-    """Claim a record label, or return the video_id of whoever already owns it.
+def reserve_record(record, source_url=None, user_id=None):
+    """Claim a record label for user_id (None = no owner), or return the
+    video_id of the existing record with that label for that owner.
 
     Returns (video_id, is_new). The INSERT ... ON CONFLICT DO NOTHING against
-    the records primary key is what makes two concurrent submissions of the
-    same label safe: exactly one caller sees is_new=True.
+    the unique (owner, label) index is what makes two concurrent submissions
+    of the same label safe: exactly one caller sees is_new=True.
     """
     video_id = str(uuid.uuid4())
     with get_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO records (record, video_id, source_url)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (record) DO NOTHING
+                INSERT INTO records (record, video_id, source_url, user_id)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT ((COALESCE(user_id, 0)), record) DO NOTHING
                 RETURNING video_id;
                 """,
-                (record, video_id, source_url)
+                (record, video_id, source_url, user_id)
             )
             row = cursor.fetchone()
             if row:
                 return row[0], True
-            cursor.execute("SELECT video_id FROM records WHERE record = %s;", (record,))
+            cursor.execute(
+                "SELECT video_id FROM records WHERE record = %s AND user_id IS NOT DISTINCT FROM %s;",
+                (record, user_id)
+            )
             return cursor.fetchone()[0], False
 
 
