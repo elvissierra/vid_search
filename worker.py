@@ -35,6 +35,15 @@ def set_progress(job_id, progress):
             )
 
 
+def set_audio_seconds(job_id, seconds):
+    """Record the transcribed length; this is the usage ledger entry."""
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE jobs SET audio_seconds = %s WHERE id = %s;", (seconds, job_id)
+            )
+
+
 def finish_job(job_id, status, error=None):
     with get_conn() as conn:
         with conn.cursor() as cursor:
@@ -91,6 +100,7 @@ def process_job(job):
             audio_file, record, video_id,
             language=language,
             progress_cb=lambda p: set_progress(job_id, p),
+            duration_cb=lambda s: set_audio_seconds(job_id, s),
         )
         finish_job(job_id, 'done')
         print(f"Job {job_id} done")

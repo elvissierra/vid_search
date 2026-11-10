@@ -11,6 +11,7 @@ import exports
 from db import get_conn
 from languages import normalize_language
 import uploads
+import usage
 from vid_search import reserve_record, release_record
 
 env = environ.Env()
@@ -31,6 +32,11 @@ def too_large(_e):
 @app.errorhandler(auth.AuthRequired)
 def auth_required(_e):
     return jsonify({"error": "Authentication required"}), 401
+
+
+def quota_response(summary):
+    """402 body for a user who has used up this month's free tier."""
+    return jsonify({"error": "Monthly free-tier quota used up", **summary}), 402
 
 
 def viewer():
@@ -114,6 +120,23 @@ def me():
         return jsonify({"error": "Internal server error"}), 500
 
 
+@app.route('/api/usage', methods=['GET'])
+def get_usage():
+    """
+    This month's transcription usage for the logged-in user:
+    `{used_seconds, limit_seconds, remaining_seconds, period_start, period_end}`.
+    401 without a valid token (anonymous requests are not metered).
+    """
+    user_id = viewer()
+    if user_id is None:
+        return jsonify({"error": "Authentication required"}), 401
+    try:
+        return jsonify(usage.usage_summary(user_id)), 200
+    except Exception:
+        app.logger.exception("Failed to load usage")
+        return jsonify({"error": "Internal server error"}), 500
+
+
 @app.route('/api/records', methods=['GET'])
 def get_records():
     """
@@ -147,7 +170,9 @@ def transcribe_search():
     job. It only matters when a new record is queued.
 
     Records are scoped to the logged-in user (bearer token); without a token
-    only unowned records are visible. Labels are unique per owner.
+    only unowned records are visible. Labels are unique per owner. Queueing a
+    new record is refused with 402 once the user has used up this month's
+    free tier (see usage.py).
     """
     user_id = viewer()
     data = request.get_json()
@@ -172,6 +197,10 @@ def transcribe_search():
         if not existing_record:
             if not video_url:
                 return jsonify({"error": "Record or video URL is required"}), 400
+
+            over = usage.quota_exceeded(user_id)
+            if over:
+                return quota_response(over)
 
             video_id, is_new = reserve_record(record, source_url=video_url, user_id=user_id)
             if not is_new:
@@ -224,7 +253,8 @@ def upload_media():
     `file`, `record` and an optional `language`. The file is validated
     (extension allow-list, MAX_UPLOAD_MB), stored under a server-generated
     name, and queued with its path in jobs.upload_path; the worker deletes it
-    after the job. Returns 202 with the job id, like /api/search. The record
+    after the job. Returns 202 with the job id, like /api/search; 402 if the
+    free-tier quota is used up (checked before the file is stored). The record
     belongs to the logged-in user (see /api/search).
     """
     user_id = viewer()
@@ -236,6 +266,14 @@ def upload_media():
         language = normalize_language(request.form.get('language'))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+    try:
+        over = usage.quota_exceeded(user_id)
+    except Exception:
+        app.logger.exception("Quota check failed")
+        return jsonify({"error": "Internal server error"}), 500
+    if over:
+        return quota_response(over)
 
     path = None
     video_id = None

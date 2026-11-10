@@ -87,11 +87,13 @@ def release_record(record, video_id):
             )
 
 
-def process_audio(audio_file, record, video_id, language=None, progress_cb=None):
+def process_audio(audio_file, record, video_id, language=None, progress_cb=None, duration_cb=None):
     """Transcribe + diarize a local audio file and persist the word rows.
 
     The record label must already be reserved (see reserve_record) and its
-    video_id passed in. progress_cb, when given, receives percent milestones.
+    video_id passed in. progress_cb, when given, receives percent milestones; duration_cb receives
+    the transcribed audio length in seconds (end of the last segment) as soon
+    as transcription finishes, before diarization.
     """
     def report(progress):
         if progress_cb:
@@ -100,6 +102,8 @@ def process_audio(audio_file, record, video_id, language=None, progress_cb=None)
     model = get_model()
     result = model.transcribe(audio_file, word_timestamps=True, language=language)
     report(60)
+    if duration_cb:
+        duration_cb(max((float(seg['end']) for seg in result["segments"]), default=0.0))
     turns = diarize.diarize(audio_file)
     report(85)
 

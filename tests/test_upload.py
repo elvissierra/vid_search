@@ -177,7 +177,7 @@ def test_worker_deletes_upload_after_success(client, db, tmp_path, monkeypatch):
     (path,), = rows(db, "SELECT upload_path FROM jobs")
     seen = {}
 
-    def fake_process(audio_file, record, video_id, language=None, progress_cb=None):
+    def fake_process(audio_file, record, video_id, **kwargs):
         seen["file"] = audio_file
         assert os.path.exists(audio_file)
 
