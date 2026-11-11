@@ -1,7 +1,8 @@
 # Whole stack: docker compose up --build
 #   UI  http://localhost:8080    API  http://localhost:5000
 # Optional overrides (shell or a compose .env file): DB_PASSWORD, HF_TOKEN,
-# API_PORT, UI_PORT, VITE_API_URL, MAX_UPLOAD_MB, FREE_TIER_MINUTES.
+# API_PORT, UI_PORT, VITE_API_URL, MAX_UPLOAD_MB, FREE_TIER_MINUTES,
+# RATE_LIMIT_SEARCH_PER_MIN, RATE_LIMIT_INGEST_PER_MIN.
 x-backend: &backend
   build: .
   environment:
@@ -15,6 +16,8 @@ x-backend: &backend
     UPLOAD_DIR: /data/uploads
     MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
     FREE_TIER_MINUTES: ${FREE_TIER_MINUTES:-60}
+    RATE_LIMIT_SEARCH_PER_MIN: ${RATE_LIMIT_SEARCH_PER_MIN:-60}
+    RATE_LIMIT_INGEST_PER_MIN: ${RATE_LIMIT_INGEST_PER_MIN:-10}
   volumes:
     # Uploads are written by the api and consumed (then deleted) by the worker.
     - uploads:/data/uploads

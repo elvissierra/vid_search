@@ -8,6 +8,7 @@ import environ
 
 import auth
 import exports
+import ratelimit
 from db import get_conn
 from languages import normalize_language
 import uploads
@@ -37,6 +38,25 @@ def auth_required(_e):
 def quota_response(summary):
     """402 body for a user who has used up this month's free tier."""
     return jsonify({"error": "Monthly free-tier quota used up", **summary}), 402
+
+
+def rate_limited(bucket, user_id):
+    """A 429 response if this caller is over the bucket's limit, else None.
+
+    Fails open: if the limiter's database call breaks, the request goes
+    through (the endpoint's own queries will surface a real outage).
+    """
+    try:
+        retry_after = ratelimit.check(bucket, ratelimit.client_key(user_id, request.remote_addr))
+    except Exception:
+        app.logger.exception("Rate limit check failed")
+        return None
+    if retry_after is None:
+        return None
+    resp = jsonify({"error": "Too many requests", "retry_after_seconds": retry_after})
+    resp.status_code = 429
+    resp.headers["Retry-After"] = str(retry_after)
+    return resp
 
 
 def viewer():
@@ -172,9 +192,15 @@ def transcribe_search():
     Records are scoped to the logged-in user (bearer token); without a token
     only unowned records are visible. Labels are unique per owner. Queueing a
     new record is refused with 402 once the user has used up this month's
-    free tier (see usage.py).
+    free tier (see usage.py). Calls are rate limited per caller (see
+    ratelimit.py): every call counts against the search bucket and queueing
+    a new record also against the ingest bucket; over the limit is 429 with
+    a Retry-After header.
     """
     user_id = viewer()
+    limited = rate_limited("search", user_id)
+    if limited:
+        return limited
     data = request.get_json()
     video_url = data.get('url')
     record = data.get('record')
@@ -197,6 +223,10 @@ def transcribe_search():
         if not existing_record:
             if not video_url:
                 return jsonify({"error": "Record or video URL is required"}), 400
+
+            limited = rate_limited("ingest", user_id)
+            if limited:
+                return limited
 
             over = usage.quota_exceeded(user_id)
             if over:
@@ -254,10 +284,14 @@ def upload_media():
     (extension allow-list, MAX_UPLOAD_MB), stored under a server-generated
     name, and queued with its path in jobs.upload_path; the worker deletes it
     after the job. Returns 202 with the job id, like /api/search; 402 if the
-    free-tier quota is used up (checked before the file is stored). The record
+    free-tier quota is used up (checked before the file is stored); 429 when the
+    caller exceeds the ingest rate limit (checked first). The record
     belongs to the logged-in user (see /api/search).
     """
     user_id = viewer()
+    limited = rate_limited("ingest", user_id)
+    if limited:
+        return limited
     record = (request.form.get('record') or '').strip()
     if not record:
         return jsonify({"error": "Record is required"}), 400

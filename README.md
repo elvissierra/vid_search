@@ -93,6 +93,7 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | `.env` | `UPLOAD_DIR` | Where uploaded files are stored (default `uploads/`); API and worker must share it |
 | `.env` | `MAX_UPLOAD_MB` | Upload size limit in MB (default `500`) |
 | `.env` | `FREE_TIER_MINUTES` | Monthly free-tier allowance per user in minutes (default `60`); see Usage and quota |
+| `.env` | `RATE_LIMIT_SEARCH_PER_MIN` `RATE_LIMIT_INGEST_PER_MIN` | Requests per minute per caller on search / job-queueing (defaults `60` / `10`, `0` disables); see Rate limiting |
 | `.env` | `HF_TOKEN` | Hugging Face token for pyannote diarization models |
 | `search_ui/.env` | `VITE_API_URL` | API base URL for the frontend |
 
@@ -101,8 +102,8 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/records` | List the viewer's previously ingested record labels |
-| POST | `/api/search` | Body `{url, record, keyword, language?}`. `language` is a whisper code or name (`es`, `Spanish`); omitted or `auto` detects it, anything else unsupported is `400`. It applies when a new record is queued. Existing record → `200` `{video_id, results: [{word, start, end, speaker}]}`. New record → job queued, `202` `{job_id, record}` (or `402` if the free-tier quota is used up, `409` if the label is taken) |
-| POST | `/api/upload` | Multipart form: `file` (audio/video: mp3, wav, m4a, aac, flac, ogg, opus, wma, mp4, mov, mkv, webm, avi, m4v), `record`, optional `language` (same rules as `/api/search`). Stored under a server-generated name in `UPLOAD_DIR` and queued via `jobs.upload_path`; the worker deletes it after the job. `202` `{job_id, record}`; `400` bad type/missing file/record/language; `402` free-tier quota used up; `409` label taken; `413` over `MAX_UPLOAD_MB` |
+| POST | `/api/search` | Body `{url, record, keyword, language?}`. `language` is a whisper code or name (`es`, `Spanish`); omitted or `auto` detects it, anything else unsupported is `400`. It applies when a new record is queued. Existing record → `200` `{video_id, results: [{word, start, end, speaker}]}`. New record → job queued, `202` `{job_id, record}` (or `402` if the free-tier quota is used up, `409` if the label is taken); `429` when rate limited |
+| POST | `/api/upload` | Multipart form: `file` (audio/video: mp3, wav, m4a, aac, flac, ogg, opus, wma, mp4, mov, mkv, webm, avi, m4v), `record`, optional `language` (same rules as `/api/search`). Stored under a server-generated name in `UPLOAD_DIR` and queued via `jobs.upload_path`; the worker deletes it after the job. `202` `{job_id, record}`; `400` bad type/missing file/record/language; `402` free-tier quota used up; `409` label taken; `413` over `MAX_UPLOAD_MB`; `429` rate limited |
 | POST | `/api/signup` | Body `{email, password}` (password 8-128 characters; email is lowercased). `201` `{user: {id, email}, token}`; `400` invalid email/password; `409` email already registered. Send the token as `Authorization: Bearer <token>`. Passwords are stored as scrypt hashes and only the sha256 of each token is stored; sessions last 30 days |
 | POST | `/api/login` | Body `{email, password}`. `200` `{user, token}` (a new session each time); `401` for bad credentials, with the same answer for an unknown email |
 | POST | `/api/logout` | Revokes the bearer token used. `204`; `401` if not logged in |
@@ -118,6 +119,10 @@ Records and jobs belong to the user whose bearer token created them, and every r
 ### Usage and quota
 
 The worker records each job's transcribed length in `jobs.audio_seconds` as soon as transcription finishes, and the `usage_ledger` view exposes every owned job that has one. A user's usage is the sum for the current UTC calendar month, including jobs that failed after transcribing (the time was spent). Queueing a new record via `/api/search` or `/api/upload` returns `402` with the usage summary once a logged-in user has used `FREE_TIER_MINUTES` (default 60); searching existing records is never blocked. The length of a new file is unknown until it is transcribed, so the check stops the next job rather than capping the current one, and concurrent requests can overshoot slightly. Anonymous requests are not metered.
+
+### Rate limiting
+
+`/api/search` and `/api/upload` are limited per caller in one-minute windows: every `/api/search` call counts against the search limit (`RATE_LIMIT_SEARCH_PER_MIN`, default 60), and anything that queues a new job (`/api/upload`, or `/api/search` with a new record) also counts against the ingest limit (`RATE_LIMIT_INGEST_PER_MIN`, default 10). Over the limit is `429` with `{error, retry_after_seconds}` and a `Retry-After` header; the ingest check runs before the quota check and before any file is stored. A caller is the logged-in user, or the remote address when anonymous (behind a reverse proxy, anonymous callers share the proxy's address unless it is rewritten, e.g. with werkzeug `ProxyFix`). Counters live in the `rate_limits` table so the limit holds across api processes; windows are fixed, so a burst up to twice the limit is possible across a boundary. If the limiter's database call fails the request is let through. `0` turns a limit off.
 
 ## Tests
 
