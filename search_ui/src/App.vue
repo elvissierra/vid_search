@@ -6,6 +6,10 @@
           <span class="brand-mark">◎</span>
           <h1>Video Search</h1>
         </div>
+        <div v-if="user" class="account-chip">
+          <span class="account-email">{{ user.email }}</span>
+          <button type="button" class="account-logout" @click="logout">Log out</button>
+        </div>
         <nav>
           <button @click="currentPage = 'search'" :class="{ active: currentPage === 'search' }">Search</button>
           <button @click="currentPage = 'about'" :class="{ active: currentPage === 'about' }">About</button>
@@ -14,6 +18,59 @@
 
       <main>
         <div v-if="currentPage === 'search'" class="main-content">
+          <div class="left-column">
+          <!-- Account Section -->
+          <section v-if="!user" class="panel account-panel">
+            <h2 class="panel-title">{{ authMode === 'login' ? 'Log in' : 'Create account' }}</h2>
+            <form class="input-group" @submit.prevent="submitAuth">
+              <label class="field-label" for="auth-email">Email</label>
+              <input id="auth-email" v-model="authEmail" type="email" autocomplete="email" class="input-field" />
+              <label class="field-label" for="auth-password">Password</label>
+              <input
+                id="auth-password"
+                v-model="authPassword"
+                type="password"
+                :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"
+                class="input-field"
+              />
+              <p v-if="authMode === 'signup'" class="field-hint">8 to 128 characters.</p>
+              <button
+                type="submit"
+                class="search-button"
+                :disabled="authBusy || !authEmail || !authPassword"
+              >{{ authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : 'Sign up' }}</button>
+            </form>
+            <p v-if="authError" class="auth-error">{{ authError }}</p>
+            <button type="button" class="auth-switch" @click="toggleAuthMode">
+              {{ authMode === 'login' ? 'No account? Create one' : 'Have an account? Log in' }}
+            </button>
+            <p class="field-hint">Searching without an account only shows recordings that existed before accounts.</p>
+          </section>
+
+          <section v-else class="panel usage-panel">
+            <h2 class="panel-title">Usage this month</h2>
+            <template v-if="usage">
+              <div
+                class="progress-track usage-track"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="usagePct"
+              >
+                <div
+                  class="progress-fill"
+                  :class="{ 'usage-over': overQuota }"
+                  :style="{ width: usagePct + '%' }"
+                ></div>
+              </div>
+              <p class="status-sub">{{ usageText }}</p>
+              <p v-if="overQuota" class="auth-error">
+                Free tier used up. Existing recordings stay searchable; new ones resume next month.
+              </p>
+            </template>
+            <p v-else class="field-hint">Usage unavailable right now.</p>
+          </section>
+
           <!-- Form Section -->
           <section class="panel form-panel">
             <h2 class="panel-title">New Search</h2>
@@ -117,6 +174,7 @@
               </div>
             </transition>
           </section>
+          </div>
 
           <!-- Results Section -->
           <section class="panel results-panel">
@@ -130,13 +188,13 @@
             <div v-if="searchPerformed && videoId" class="export-actions">
               <span class="export-label">Export transcript</span>
               <div class="export-links">
-                <a
+                <button
                   v-for="fmt in exportFormats"
                   :key="fmt"
-                  :href="exportUrl(fmt)"
+                  type="button"
                   class="export-link"
-                  download
-                >{{ fmt.toUpperCase() }}</a>
+                  @click="downloadExport(fmt)"
+                >{{ fmt.toUpperCase() }}</button>
               </div>
             </div>
 
@@ -177,7 +235,7 @@
 
 <script>
 import axios from 'axios';
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { LANGUAGES } from './languages';
 import {
   UPLOAD_ACCEPT,
@@ -185,6 +243,15 @@ import {
   labelFromFilename,
   formatBytes,
 } from './uploadTypes';
+import {
+  loadToken,
+  saveToken,
+  clearToken,
+  authHeader,
+  usagePercent,
+  usageLabel,
+  isOverQuota,
+} from './auth';
 
 export default {
   setup() {
@@ -234,7 +301,25 @@ export default {
       if (!uploadBlocked()) setFile(event.dataTransfer?.files?.[0]);
     };
 
-    onMounted(async () => {
+    const user = ref(null);
+    const usage = ref(null);
+    const authMode = ref('login');
+    const authEmail = ref('');
+    const authPassword = ref('');
+    const authError = ref('');
+    const authBusy = ref(false);
+
+    const usagePct = computed(() => usagePercent(usage.value));
+    const usageText = computed(() => usageLabel(usage.value));
+    const overQuota = computed(() => isOverQuota(usage.value));
+
+    const applyToken = (token) => {
+      const header = authHeader(token);
+      if (header) axios.defaults.headers.common.Authorization = header;
+      else delete axios.defaults.headers.common.Authorization;
+    };
+
+    const loadRecords = async () => {
       try {
         const response = await axios.get('/api/records');
         records.value = response.data.records || [];
@@ -242,6 +327,91 @@ export default {
         console.error('Error fetching records:', error);
         errorMessage.value = 'Could not load previous records.';
       }
+    };
+
+    const refreshUsage = async () => {
+      if (!user.value) {
+        usage.value = null;
+        return;
+      }
+      try {
+        usage.value = (await axios.get('/api/usage')).data;
+      } catch (error) {
+        console.error('Error fetching usage:', error);
+        usage.value = null;
+      }
+    };
+
+    // Clears everything tied to the previous viewer, then reloads for the new one.
+    const resetViewer = async () => {
+      selectedRecord.value = '';
+      results.value = [];
+      searchPerformed.value = false;
+      videoId.value = null;
+      errorMessage.value = '';
+      records.value = [];
+      await Promise.all([loadRecords(), refreshUsage()]);
+    };
+
+    const startSession = async (token, sessionUser) => {
+      saveToken(window.localStorage, token);
+      applyToken(token);
+      user.value = sessionUser;
+      authPassword.value = '';
+      await resetViewer();
+    };
+
+    const submitAuth = async () => {
+      authBusy.value = true;
+      authError.value = '';
+      try {
+        const path = authMode.value === 'login' ? '/api/login' : '/api/signup';
+        const { data } = await axios.post(path, {
+          email: authEmail.value,
+          password: authPassword.value,
+        });
+        await startSession(data.token, data.user);
+      } catch (error) {
+        authError.value = error.response?.data?.error || error.message || 'Something went wrong.';
+      } finally {
+        authBusy.value = false;
+      }
+    };
+
+    const toggleAuthMode = () => {
+      authMode.value = authMode.value === 'login' ? 'signup' : 'login';
+      authError.value = '';
+    };
+
+    const logout = async () => {
+      try {
+        await axios.post('/api/logout');
+      } catch (error) {
+        // an already-expired session is still logged out locally
+        console.error('Error logging out:', error);
+      }
+      clearToken(window.localStorage);
+      applyToken('');
+      user.value = null;
+      usage.value = null;
+      await resetViewer();
+    };
+
+    onMounted(async () => {
+      const token = loadToken(window.localStorage);
+      if (token) {
+        applyToken(token);
+        try {
+          user.value = (await axios.get('/api/me')).data.user;
+        } catch (error) {
+          // expired or revoked: continue anonymously
+          if (error.response?.status === 401) {
+            clearToken(window.localStorage);
+            applyToken('');
+          }
+        }
+      }
+      await Promise.all([loadRecords(), refreshUsage()]);
     });
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -297,6 +467,7 @@ export default {
 
         if (response.status === 202) {
           await waitForJob(response.data.job_id);
+          refreshUsage();
           if (!records.value.includes(recordToUse)) {
             records.value.push(recordToUse);
           }
@@ -318,6 +489,7 @@ export default {
         isLoading.value = false;
         jobProgress.value = null;
         uploadProgress.value = null;
+        refreshUsage();
       }
     };
 
@@ -341,9 +513,25 @@ export default {
       return speakerPalette[hash % speakerPalette.length];
     };
 
-    const exportUrl = (fmt) => {
-      const base = axios.defaults.baseURL || '';
-      return `${base}/api/export/${videoId.value}?format=${fmt}`;
+    // The bearer token can't ride on a plain link, so fetch the file and save the blob.
+    const downloadExport = async (fmt) => {
+      try {
+        const { data } = await axios.get(`/api/export/${videoId.value}`, {
+          params: { format: fmt },
+          responseType: 'blob',
+        });
+        const href = URL.createObjectURL(data);
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = `${videoId.value}.${fmt}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(href);
+      } catch (error) {
+        console.error('Error exporting transcript:', error);
+        errorMessage.value = 'Could not export the transcript.';
+      }
     };
 
     return {
@@ -375,7 +563,20 @@ export default {
       speakerColor,
       videoId,
       exportFormats,
-      exportUrl,
+      downloadExport,
+      user,
+      usage,
+      usagePct,
+      usageText,
+      overQuota,
+      authMode,
+      authEmail,
+      authPassword,
+      authError,
+      authBusy,
+      submitAuth,
+      toggleAuthMode,
+      logout,
     };
   }
 };
@@ -783,9 +984,60 @@ nav button.active {
     flex-direction: column;
   }
 
+  .left-column,
   .form-panel,
   .results-panel {
     width: 100%;
   }
+}
+
+.left-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 320px;
+}
+
+.account-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.account-logout,
+.auth-switch {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.auth-switch {
+  margin-top: 0.75rem;
+}
+
+.auth-error {
+  margin-top: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--color-error);
+}
+
+.usage-track {
+  margin-top: 0;
+}
+
+.usage-over {
+  background-color: var(--color-error);
+}
+
+.export-link {
+  border: none;
+  cursor: pointer;
 }
 </style>

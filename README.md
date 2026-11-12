@@ -76,6 +76,8 @@ In the UI, drop an audio or video file onto the upload box (or click it to brows
 
 ### Docker
 
+Accounts in the UI: the left column has a log in / sign up form. After signing in, the token is kept in `localStorage` and sent as `Authorization: Bearer` on every request, the record list reloads for that user, and a usage meter shows this month's transcribed time against `FREE_TIER_MINUTES` (it turns red and explains when the quota is used up). Log out revokes the token. Transcript exports are fetched through the API client and saved as a file, since a plain link cannot carry the token. Without an account the UI still works anonymously against pre-accounts recordings.
+
 One command runs the whole stack (Postgres, migrations, API, worker, UI):
 
 ```bash
