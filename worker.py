@@ -8,6 +8,7 @@ import os
 import time
 
 import diarize
+import resolver
 import vid_search
 from db import get_conn
 
@@ -93,7 +94,7 @@ def process_job(job):
         if upload_path:
             audio_file = upload_path
         else:
-            audio_file = vid_search.download_video_audio(url)
+            audio_file = vid_search.download_video_audio(resolver.resolve_audio_url(url))
         set_progress(job_id, 25)
 
         vid_search.process_audio(

@@ -114,6 +114,10 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | GET | `/api/jobs/<job_id>` | Job status (`404` for another owner's job): `{id, status, progress, record, video_id, error, created_at, finished_at}` |
 | GET | `/api/export/<video_id>?format=` | Transcript as `srt`, `vtt`, `txt` (default) or `json`; `404` unless the viewer owns the record |
 
+### Podcast links
+
+The worker resolves Spotify and Apple Podcasts episode links (`open.spotify.com/episode/...`, `podcasts.apple.com/...?i=<episode id>`) to the episode's original RSS audio URL before downloading, using the iTunes lookup/search API (`resolver.py`). Spotify links are matched by episode title, so Spotify-exclusive episodes and Apple show pages (no `?i=`) fail the job with a clear error. All other URLs go to `yt-dlp` unchanged.
+
 ### Ownership
 
 Records and jobs belong to the user whose bearer token created them, and every records, search, upload, job and export endpoint only sees the viewer's own rows. A label is unique per owner, so two users can each have an `episode-1`. A request without an `Authorization` header is anonymous and only sees rows that have no owner (everything ingested before accounts existed); a header whose token is invalid or expired is `401`, never a silent fall back to anonymous. Another owner's job or export is `404`, the same as one that does not exist.
