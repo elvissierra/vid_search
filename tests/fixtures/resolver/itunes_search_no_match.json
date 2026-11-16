@@ -1,0 +1,7 @@
+{
+  "resultCount": 2,
+  "results": [
+    {"wrapperType": "podcastEpisode", "trackName": "Episode 6", "episodeUrl": "https://cdn.example.com/ep6.mp3"},
+    {"wrapperType": "podcastEpisode", "trackName": "Episode 5: The Big One!"}
+  ]
+}

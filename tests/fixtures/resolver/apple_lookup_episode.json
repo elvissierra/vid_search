@@ -1,0 +1,16 @@
+{
+  "resultCount": 1,
+  "results": [
+    {
+      "wrapperType": "podcastEpisode",
+      "kind": "podcast-episode",
+      "trackId": 1000111222,
+      "trackName": "Episode 5: The Big One!",
+      "collectionId": 12345,
+      "collectionName": "Some Show",
+      "episodeUrl": "https://cdn.example.com/some-show/ep5.mp3?token=abc&x=1",
+      "episodeFileExtension": "mp3",
+      "trackTimeMillis": 2712000
+    }
+  ]
+}

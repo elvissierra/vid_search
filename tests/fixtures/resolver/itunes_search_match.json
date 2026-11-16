@@ -1,0 +1,8 @@
+{
+  "resultCount": 3,
+  "results": [
+    {"wrapperType": "podcastEpisode", "trackName": "Episode 50", "episodeUrl": "https://cdn.example.com/wrong.mp3"},
+    {"wrapperType": "podcastEpisode", "trackName": "episode 5 - the big one", "episodeUrl": "https://cdn.example.com/some-show/ep5.mp3"},
+    {"wrapperType": "podcastEpisode", "trackName": "Episode 5: The Big One!", "episodeUrl": "https://cdn.example.com/dupe.mp3"}
+  ]
+}
