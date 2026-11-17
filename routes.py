@@ -1,5 +1,4 @@
 import os
-import re
 import uuid
 
 from flask import Flask, request, jsonify
@@ -189,6 +188,11 @@ def transcribe_search():
     omitted or "auto" means detect) is validated up front and stored on the
     job. It only matters when a new record is queued.
 
+    The keyword matches whole words, case-insensitively and ignoring
+    surrounding punctuation ("hello" finds " Hello,"), via the indexed
+    transcripts.word_norm column. A keyword with no letters or digits matches
+    nothing.
+
     Records are scoped to the logged-in user (bearer token); without a token
     only unowned records are visible. Labels are unique per owner. Queueing a
     new record is refused with 402 once the user has used up this month's
@@ -205,6 +209,8 @@ def transcribe_search():
     video_url = data.get('url')
     record = data.get('record')
     keyword = data.get('keyword')
+    if keyword is not None and not isinstance(keyword, str):
+        return jsonify({"error": "keyword must be a string"}), 400
 
     try:
         language = normalize_language(data.get('language'))
@@ -251,16 +257,14 @@ def transcribe_search():
         video_id = existing_record[0]
 
         if keyword:
-            regex_clean = rf"\m{re.escape(keyword)}\M"
-
             with get_conn() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute("""
                         SELECT word, start_time, end_time, speaker
                         FROM transcripts
-                        WHERE video_id = %s AND word ~* %s
+                        WHERE video_id = %s AND word_norm <> '' AND word_norm = normalize_word(%s)
                         ORDER BY start_time
-                    """, (video_id, regex_clean))
+                    """, (video_id, keyword))
                     rows = cursor.fetchall()
 
             results = [
