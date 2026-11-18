@@ -104,11 +104,6 @@ def test_keyword_without_letters_or_digits_matches_nothing(client, db):
         assert found(search(client, keyword)) == [], keyword
 
 
-def test_multi_word_keyword_matches_nothing_yet(client, db):
-    seed(db, [" hello", " world"])
-    assert found(search(client, "hello world")) == []
-
-
 def test_results_are_ordered_by_start_time_and_scoped_to_the_video(client, db):
     seed(db, [" go", " stop", " go"], video_id="vid-a", record="a")
     seed(db, [" go"], video_id="vid-b", record="b")

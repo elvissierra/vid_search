@@ -7,6 +7,7 @@ import environ
 
 import auth
 import exports
+import phrase
 import ratelimit
 from db import get_conn
 from languages import normalize_language
@@ -190,8 +191,10 @@ def transcribe_search():
 
     The keyword matches whole words, case-insensitively and ignoring
     surrounding punctuation ("hello" finds " Hello,"), via the indexed
-    transcripts.word_norm column. A keyword with no letters or digits matches
-    nothing.
+    transcripts.word_norm column. A keyword of several words is a phrase: it
+    matches those words in order, back to back (see phrase.py), and is limited
+    to phrase.MAX_PHRASE_WORDS words (400 beyond that). A keyword with no
+    letters or digits matches nothing.
 
     Records are scoped to the logged-in user (bearer token); without a token
     only unowned records are visible. Labels are unique per owner. Queueing a
@@ -211,6 +214,8 @@ def transcribe_search():
     keyword = data.get('keyword')
     if keyword is not None and not isinstance(keyword, str):
         return jsonify({"error": "keyword must be a string"}), 400
+    if keyword and len(phrase.split_keyword(keyword)) > phrase.MAX_PHRASE_WORDS:
+        return jsonify({"error": f"keyword is limited to {phrase.MAX_PHRASE_WORDS} words"}), 400
 
     try:
         language = normalize_language(data.get('language'))
@@ -259,13 +264,7 @@ def transcribe_search():
         if keyword:
             with get_conn() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT word, start_time, end_time, speaker
-                        FROM transcripts
-                        WHERE video_id = %s AND word_norm <> '' AND word_norm = normalize_word(%s)
-                        ORDER BY start_time
-                    """, (video_id, keyword))
-                    rows = cursor.fetchall()
+                    rows = phrase.search_words(cursor, video_id, keyword)
 
             results = [
                 {"word": word, "start": start, "end": end, "speaker": speaker}
