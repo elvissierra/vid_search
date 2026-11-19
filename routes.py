@@ -23,6 +23,9 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 app.config["MAX_CONTENT_LENGTH"] = uploads.max_upload_bytes()
 
+LIBRARY_RESULTS_DEFAULT = 100
+MAX_LIBRARY_RESULTS = 500
+
 
 @app.errorhandler(413)
 def too_large(_e):
@@ -276,6 +279,59 @@ def transcribe_search():
 
     except Exception:
         app.logger.exception("Transcription or search failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/search/all', methods=['POST'])
+def search_library():
+    """
+    Search every record the viewer can see (same scoping as /api/records) for
+    a keyword or phrase, using the same matching as /api/search. Body
+    `{keyword, limit?}`; `keyword` is required (a non-blank string of at most
+    phrase.MAX_PHRASE_WORDS words, else 400) and `limit` is an integer from 1
+    to MAX_LIBRARY_RESULTS (default LIBRARY_RESULTS_DEFAULT). Returns 200
+    `{keyword, results: [{record, video_id, word, start, end, speaker}],
+    truncated}`: records in label order, then position in the recording;
+    `truncated` is true when more hits exist than `limit`. Counts against the
+    search rate limit (429 over it). Never queues a job.
+    """
+    user_id = viewer()
+    limited = rate_limited("search", user_id)
+    if limited:
+        return limited
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    keyword = data.get('keyword')
+    if not isinstance(keyword, str) or not keyword.strip():
+        return jsonify({"error": "keyword must be a non-empty string"}), 400
+    if len(phrase.split_keyword(keyword)) > phrase.MAX_PHRASE_WORDS:
+        return jsonify({"error": f"keyword is limited to {phrase.MAX_PHRASE_WORDS} words"}), 400
+    limit = data.get('limit', LIBRARY_RESULTS_DEFAULT)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIBRARY_RESULTS:
+        return jsonify({"error": f"limit must be an integer from 1 to {MAX_LIBRARY_RESULTS}"}), 400
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT record, video_id FROM records WHERE user_id IS NOT DISTINCT FROM %s ORDER BY record;",
+                    (user_id,)
+                )
+                records = cursor.fetchall()
+                labels = {video_id: record for (record, video_id) in records}
+                rows = phrase.search_many(
+                    cursor, [video_id for (_, video_id) in records], keyword, limit + 1
+                ) if records else []
+
+        results = [
+            {"record": labels[video_id], "video_id": video_id,
+             "word": word, "start": start, "end": end, "speaker": speaker}
+            for (video_id, word, start, end, speaker) in rows[:limit]
+        ]
+        return jsonify({"keyword": keyword, "results": results, "truncated": len(rows) > limit}), 200
+    except Exception:
+        app.logger.exception("Library search failed")
         return jsonify({"error": "Internal server error"}), 500
 
 
