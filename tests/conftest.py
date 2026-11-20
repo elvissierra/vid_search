@@ -24,5 +24,5 @@ def db(_schema):
     from db import get_conn
     with get_conn() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("TRUNCATE jobs, records, transcripts, users, sessions, rate_limits;")
+            cursor.execute("TRUNCATE jobs, records, transcripts, users, sessions, rate_limits, segment_embeddings;")
     return get_conn

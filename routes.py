@@ -6,6 +6,7 @@ from flask_cors import CORS
 import environ
 
 import auth
+import embeddings
 import exports
 import phrase
 import ratelimit
@@ -25,6 +26,9 @@ app.config["MAX_CONTENT_LENGTH"] = uploads.max_upload_bytes()
 
 LIBRARY_RESULTS_DEFAULT = 100
 MAX_LIBRARY_RESULTS = 500
+SEMANTIC_RESULTS_DEFAULT = 10
+MAX_SEMANTIC_RESULTS = 50
+MAX_SEMANTIC_QUERY_CHARS = 500
 
 
 @app.errorhandler(413)
@@ -332,6 +336,57 @@ def search_library():
         return jsonify({"keyword": keyword, "results": results, "truncated": len(rows) > limit}), 200
     except Exception:
         app.logger.exception("Library search failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/search/semantic', methods=['POST'])
+def search_semantic():
+    """
+    Find the transcript segments closest in meaning to a free-text query,
+    across every record the viewer can see (same scoping as /api/records).
+    Body `{query, limit?}`; `query` is a non-blank string of at most
+    MAX_SEMANTIC_QUERY_CHARS characters and `limit` an integer from 1 to
+    MAX_SEMANTIC_RESULTS (default SEMANTIC_RESULTS_DEFAULT), else 400.
+    Returns 200 `{query, results: [{record, video_id, text, start, end,
+    score}]}` best first, `score` being cosine similarity. Records without
+    embeddings (see embeddings.py) never match. Counts against the search
+    rate limit (429 over it). Never queues a job.
+    """
+    user_id = viewer()
+    limited = rate_limited("search", user_id)
+    if limited:
+        return limited
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    query = data.get('query')
+    if not isinstance(query, str) or not query.strip():
+        return jsonify({"error": "query must be a non-empty string"}), 400
+    if len(query) > MAX_SEMANTIC_QUERY_CHARS:
+        return jsonify({"error": f"query is limited to {MAX_SEMANTIC_QUERY_CHARS} characters"}), 400
+    limit = data.get('limit', SEMANTIC_RESULTS_DEFAULT)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_SEMANTIC_RESULTS:
+        return jsonify({"error": f"limit must be an integer from 1 to {MAX_SEMANTIC_RESULTS}"}), 400
+
+    try:
+        query_vector = embeddings.embed([query.strip()])[0]
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT record, video_id FROM records WHERE user_id IS NOT DISTINCT FROM %s;",
+                    (user_id,)
+                )
+                labels = {video_id: record for (record, video_id) in cursor.fetchall()}
+                rows = embeddings.search(cursor, list(labels), query_vector, limit)
+
+        results = [
+            {"record": labels[video_id], "video_id": video_id, "text": text,
+             "start": start, "end": end, "score": score}
+            for (video_id, text, start, end, score) in rows
+        ]
+        return jsonify({"query": query, "results": results}), 200
+    except Exception:
+        app.logger.exception("Semantic search failed")
         return jsonify({"error": "Internal server error"}), 500
 
 

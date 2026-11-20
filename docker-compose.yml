@@ -24,7 +24,7 @@ x-backend: &backend
 
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: vid_search
       POSTGRES_USER: postgres
@@ -49,6 +49,10 @@ services:
     <<: *backend
     ports:
       - "${API_PORT:-5000}:5000"
+    volumes:
+      - uploads:/data/uploads
+      # The sentence-transformers model that embeds search queries.
+      - model_cache:/root/.cache
     depends_on:
       migrate:
         condition: service_completed_successfully

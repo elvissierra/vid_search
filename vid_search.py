@@ -4,6 +4,7 @@ import uuid
 from psycopg2.extras import execute_values
 
 import diarize
+import embeddings
 from db import get_conn
 
 _model = None
@@ -87,6 +88,28 @@ def release_record(record, video_id):
             )
 
 
+def embed_segments(segments):
+    """(segment_index, text, start, end, vector) for each non-empty segment.
+
+    Best effort: the transcript is useful without embeddings (keyword search
+    does not need them), so a failure here is logged and the job still
+    succeeds. `python embeddings.py backfill` fills the gap later.
+    """
+    try:
+        items = [
+            (i, str(seg['text']).strip(), float(seg['start']), float(seg['end']))
+            for i, seg in enumerate(segments)
+            if str(seg['text']).strip()
+        ]
+        if not items:
+            return []
+        vectors = embeddings.embed([text for (_, text, _, _) in items])
+    except Exception as e:
+        print(f"Embedding failed, continuing without semantic index: {e}")
+        return []
+    return [item + (vec,) for item, vec in zip(items, vectors)]
+
+
 def process_audio(audio_file, record, video_id, language=None, progress_cb=None, duration_cb=None):
     """Transcribe + diarize a local audio file and persist the word rows.
 
@@ -124,6 +147,8 @@ def process_audio(audio_file, record, video_id, language=None, progress_cb=None,
                 diarize.assign_speaker(start_time, end_time, turns),
             ))
 
+    segment_embeddings = embed_segments(result["segments"])
+
     with get_conn() as conn:
         with conn.cursor() as cursor:
             execute_values(
@@ -135,5 +160,6 @@ def process_audio(audio_file, record, video_id, language=None, progress_cb=None,
                 """,
                 rows
             )
+            embeddings.store(cursor, video_id, segment_embeddings)
 
     return video_id

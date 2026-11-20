@@ -11,7 +11,7 @@ speaker diarization.
 
 - **Python 3.10–3.12** (recommended — PyTorch/Whisper wheels lag behind the
   newest Python; 3.13+/3.14 may not resolve)
-- **PostgreSQL** (any recent version)
+- **PostgreSQL** 13 or newer with the [pgvector](https://github.com/pgvector/pgvector) extension (`migrate.py` runs `CREATE EXTENSION vector`; the compose file uses the `pgvector/pgvector:pg16` image)
 - **ffmpeg** on PATH (used by yt-dlp for audio extraction)
 - **Node 18+** for the frontend
 
@@ -106,6 +106,7 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | GET | `/api/records` | List the viewer's previously ingested record labels |
 | POST | `/api/search` | Body `{url, record, keyword, language?}`. `language` is a whisper code or name (`es`, `Spanish`); omitted or `auto` detects it, anything else unsupported is `400`. It applies when a new record is queued. Existing record → `200` `{video_id, results: [{word, start, end, speaker}]}`; `keyword` matches whole words case-insensitively, ignoring surrounding punctuation (`hello` finds ` Hello,`), via the indexed `word_norm` column, and must be a string (`400` otherwise). Several words make a phrase that must match consecutive words in order, also across segment boundaries (`"quick brown"` finds ` quick brown`; a hit's `word` is the matched words joined, `start`/`speaker` come from the first word and `end` from the last); stand-alone punctuation tokens are skipped on both sides, and a phrase is limited to 10 words (`400` beyond that). New record → job queued, `202` `{job_id, record}` (or `402` if the free-tier quota is used up, `409` if the label is taken); `429` when rate limited |
 | POST | `/api/search/all` | Body `{keyword, limit?}`. Searches every record the viewer can see (same ownership scoping as `/api/records`) with the same matching as `/api/search` (whole words, or a phrase of up to 10 words). `200` `{keyword, results: [{record, video_id, word, start, end, speaker}], truncated}`: records in label order, then position in the recording; `limit` is 1 to 500 (default 100) and `truncated` is true when more hits exist. `400` for a missing/blank/non-string keyword, too many words, or a bad `limit`; `429` when rate limited (counts against the search limit). Never queues a job |
+| POST | `/api/search/semantic` | Body `{query, limit?}`. Finds the transcript segments closest in meaning to a free-text query across every record the viewer can see (same scoping as `/api/records`), ranked by cosine similarity over pgvector embeddings (`sentence-transformers/all-MiniLM-L6-v2`, one vector per whisper segment, written by the worker when a job finishes). `200` `{query, results: [{record, video_id, text, start, end, score}]}` best first; `limit` is 1 to 50 (default 10), `query` at most 500 characters. `400` for a missing/blank/non-string query or a bad `limit`; `429` when rate limited (counts against the search limit). Records with no embeddings never match: run `python embeddings.py backfill` to embed recordings transcribed earlier. Never queues a job |
 | POST | `/api/upload` | Multipart form: `file` (audio/video: mp3, wav, m4a, aac, flac, ogg, opus, wma, mp4, mov, mkv, webm, avi, m4v), `record`, optional `language` (same rules as `/api/search`). Stored under a server-generated name in `UPLOAD_DIR` and queued via `jobs.upload_path`; the worker deletes it after the job. `202` `{job_id, record}`; `400` bad type/missing file/record/language; `402` free-tier quota used up; `409` label taken; `413` over `MAX_UPLOAD_MB`; `429` rate limited |
 | POST | `/api/signup` | Body `{email, password}` (password 8-128 characters; email is lowercased). `201` `{user: {id, email}, token}`; `400` invalid email/password; `409` email already registered. Send the token as `Authorization: Bearer <token>`. Passwords are stored as scrypt hashes and only the sha256 of each token is stored; sessions last 30 days |
 | POST | `/api/login` | Body `{email, password}`. `200` `{user, token}` (a new session each time); `401` for bad credentials, with the same answer for an unknown email |
@@ -140,6 +141,6 @@ python migrate.py
 pytest
 ```
 
-Without `DB_NAME` set, the db-backed tests are skipped. The tests only need the light dependencies in `requirements-ci.txt`; the ML packages are imported lazily and are not required.
+Without `DB_NAME` set, the db-backed tests are skipped. The tests only need the light dependencies in `requirements-ci.txt`; the ML packages (including the embedding model) are imported lazily and replaced by fakes in tests, so they are not required. The scratch database does need pgvector installed.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs `migrate.py` and `pytest` against a Postgres 16 service with `DB_NAME` set, so the db-backed tests run rather than skip, and builds the UI with `npm run build`.
+GitHub Actions (`.github/workflows/ci.yml`) runs `migrate.py` and `pytest` against a pgvector Postgres 16 service with `DB_NAME` set, so the db-backed tests run rather than skip, and builds the UI with `npm run build`.
