@@ -8,6 +8,7 @@ import environ
 import auth
 import embeddings
 import exports
+import feeds
 import phrase
 import ratelimit
 from db import get_conn
@@ -29,6 +30,9 @@ MAX_LIBRARY_RESULTS = 500
 SEMANTIC_RESULTS_DEFAULT = 10
 MAX_SEMANTIC_RESULTS = 50
 MAX_SEMANTIC_QUERY_CHARS = 500
+BULK_ENTRIES_DEFAULT = 10
+MAX_BULK_ENTRIES = 25
+MAX_RECORD_CHARS = 200
 
 
 @app.errorhandler(413)
@@ -457,6 +461,105 @@ def upload_media():
         if video_id:
             release_record(record, video_id)
         return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/ingest/bulk', methods=['POST'])
+def ingest_bulk():
+    """
+    Queue the episodes of a podcast RSS feed or a video playlist. Body
+    `{url, limit?, language?}`; `url` is an http(s) link to a public host,
+    `limit` an integer from 1 to MAX_BULK_ENTRIES (default
+    BULK_ENTRIES_DEFAULT) and `language` as in /api/search. Each episode
+    becomes a record labelled with its title, queued like /api/search does.
+    Episodes whose label or source url the viewer already has are skipped, as
+    are any that fail to queue. Returns 202 `{queued: [{job_id, record,
+    url}], skipped: [{record, reason}]}`; 400 for bad input, 422 when the
+    feed holds no episodes, 502 when it cannot be read, 402 when the
+    free-tier quota is used up (checked once, before queueing), 429 over the
+    ingest rate limit (one hit per call).
+    """
+    user_id = viewer()
+    limited = rate_limited("ingest", user_id)
+    if limited:
+        return limited
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    url = data.get('url')
+    if not isinstance(url, str) or not url.strip():
+        return jsonify({"error": "url must be a non-empty string"}), 400
+    url = url.strip()
+    limit = data.get('limit', BULK_ENTRIES_DEFAULT)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_BULK_ENTRIES:
+        return jsonify({"error": f"limit must be an integer from 1 to {MAX_BULK_ENTRIES}"}), 400
+    try:
+        language = normalize_language(data.get('language'))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        over = usage.quota_exceeded(user_id)
+    except Exception:
+        app.logger.exception("Quota check failed")
+        return jsonify({"error": "Internal server error"}), 500
+    if over:
+        return quota_response(over)
+
+    try:
+        entries = feeds.list_entries(url, limit)
+    except feeds.InvalidUrl as e:
+        return jsonify({"error": str(e)}), 400
+    except feeds.FeedError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception:
+        app.logger.exception("Feed listing failed")
+        return jsonify({"error": "Internal server error"}), 500
+    if not entries:
+        return jsonify({"error": "No episodes found at that url"}), 422
+
+    queued, skipped = [], []
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT source_url FROM records WHERE user_id IS NOT DISTINCT FROM %s AND source_url IS NOT NULL;",
+                    (user_id,)
+                )
+                known_urls = {row[0] for row in cursor.fetchall()}
+    except Exception:
+        app.logger.exception("Bulk ingest lookup failed")
+        return jsonify({"error": "Internal server error"}), 500
+
+    for number, entry in enumerate(entries, start=1):
+        record = (entry["title"] or f"Episode {number}")[:MAX_RECORD_CHARS]
+        if entry["url"] in known_urls:
+            skipped.append({"record": record, "reason": "already ingested"})
+            continue
+        video_id = None
+        try:
+            video_id, is_new = reserve_record(record, source_url=entry["url"], user_id=user_id)
+            if not is_new:
+                skipped.append({"record": record, "reason": "label already exists"})
+                continue
+            job_id = str(uuid.uuid4())
+            with get_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO jobs (id, record, url, video_id, language, user_id)
+                        VALUES (%s, %s, %s, %s, %s, %s);
+                        """,
+                        (job_id, record, entry["url"], video_id, language, user_id)
+                    )
+            known_urls.add(entry["url"])
+            queued.append({"job_id": job_id, "record": record, "url": entry["url"]})
+        except Exception:
+            app.logger.exception("Failed to queue bulk entry")
+            if video_id:
+                release_record(record, video_id)
+            skipped.append({"record": record, "reason": "could not be queued"})
+
+    return jsonify({"queued": queued, "skipped": skipped}), 202
 
 
 @app.route('/api/jobs/<job_id>', methods=['GET'])
