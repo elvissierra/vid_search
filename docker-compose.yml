@@ -2,7 +2,7 @@
 #   UI  http://localhost:8080    API  http://localhost:5000
 # Optional overrides (shell or a compose .env file): DB_PASSWORD, HF_TOKEN,
 # API_PORT, UI_PORT, VITE_API_URL, MAX_UPLOAD_MB, FREE_TIER_MINUTES,
-# RATE_LIMIT_SEARCH_PER_MIN, RATE_LIMIT_INGEST_PER_MIN.
+# RATE_LIMIT_SEARCH_PER_MIN, RATE_LIMIT_INGEST_PER_MIN, LOG_LEVEL, METRICS_TOKEN.
 x-backend: &backend
   build: .
   environment:
@@ -18,6 +18,8 @@ x-backend: &backend
     FREE_TIER_MINUTES: ${FREE_TIER_MINUTES:-60}
     RATE_LIMIT_SEARCH_PER_MIN: ${RATE_LIMIT_SEARCH_PER_MIN:-60}
     RATE_LIMIT_INGEST_PER_MIN: ${RATE_LIMIT_INGEST_PER_MIN:-10}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    METRICS_TOKEN: ${METRICS_TOKEN:-}
   volumes:
     # Uploads are written by the api and consumed (then deleted) by the worker.
     - uploads:/data/uploads
@@ -53,6 +55,12 @@ services:
       - uploads:/data/uploads
       # The sentence-transformers model that embeds search queries.
       - model_cache:/root/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       migrate:
         condition: service_completed_successfully

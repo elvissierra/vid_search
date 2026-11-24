@@ -4,13 +4,17 @@ Claims queued jobs from the jobs table (FOR UPDATE SKIP LOCKED), runs the
 download -> transcribe -> diarize -> save pipeline, and reports progress.
 Models are loaded once at startup.
 """
+import logging
 import os
 import time
 
 import diarize
+import logs
 import resolver
 import vid_search
 from db import get_conn
+
+log = logging.getLogger("worker")
 
 POLL_SECONDS = 2
 STALE_SWEEP_SECONDS = 600
@@ -76,7 +80,7 @@ def requeue_running(only_stale=False):
                 """
             )
             if cursor.rowcount:
-                print(f"Requeued {cursor.rowcount} interrupted job(s)")
+                log.warning("requeued interrupted jobs", extra={"count": cursor.rowcount})
 
 
 def claim_job():
@@ -88,7 +92,14 @@ def claim_job():
 
 def process_job(job):
     job_id, record, url, language, upload_path, video_id = job
-    print(f"Processing job {job_id} (record: {record})")
+    log.info("job started", extra={"job_id": job_id, "record": record})
+    started = time.monotonic()
+    seconds = {}
+
+    def on_duration(audio_seconds):
+        seconds["audio"] = audio_seconds
+        set_audio_seconds(job_id, audio_seconds)
+
     audio_file = None
     try:
         if upload_path:
@@ -101,28 +112,37 @@ def process_job(job):
             audio_file, record, video_id,
             language=language,
             progress_cb=lambda p: set_progress(job_id, p),
-            duration_cb=lambda s: set_audio_seconds(job_id, s),
+            duration_cb=on_duration,
         )
         finish_job(job_id, 'done')
-        print(f"Job {job_id} done")
+        log.info("job done", extra={
+            "job_id": job_id, "record": record, "status": "done",
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "audio_seconds": seconds.get("audio"),
+        })
     except Exception as e:
         # Free the reserved label so the record can be resubmitted.
         vid_search.release_record(record, video_id)
         finish_job(job_id, 'error', error=str(e)[:500])
-        print(f"Job {job_id} failed: {e}")
+        log.error("job failed", exc_info=True, extra={
+            "job_id": job_id, "record": record, "status": "error",
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "audio_seconds": seconds.get("audio"),
+        })
     finally:
         if audio_file and os.path.exists(audio_file):
             os.remove(audio_file)
 
 
 def main():
-    print("Loading whisper model...")
+    logs.configure("worker")
+    log.info("loading whisper model")
     vid_search.get_model()
-    print("Loading diarization pipeline...")
+    log.info("loading diarization pipeline")
     diarize.get_pipeline()
 
     requeue_running()
-    print("Worker ready, polling for jobs")
+    log.info("worker ready, polling for jobs")
 
     last_sweep = time.monotonic()
     while True:

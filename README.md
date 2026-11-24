@@ -96,6 +96,8 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | `.env` | `MAX_UPLOAD_MB` | Upload size limit in MB (default `500`) |
 | `.env` | `FREE_TIER_MINUTES` | Monthly free-tier allowance per user in minutes (default `60`); see Usage and quota |
 | `.env` | `RATE_LIMIT_SEARCH_PER_MIN` `RATE_LIMIT_INGEST_PER_MIN` | Requests per minute per caller on search / job-queueing (defaults `60` / `10`, `0` disables); see Rate limiting |
+| `.env` | `LOG_LEVEL` | Log verbosity for the api and worker (default `INFO`); see Observability |
+| `.env` | `METRICS_TOKEN` | Bearer token that enables `GET /api/metrics` (unset = endpoint disabled) |
 | `.env` | `HF_TOKEN` | Hugging Face token for pyannote diarization models |
 | `search_ui/.env` | `VITE_API_URL` | API base URL for the frontend |
 
@@ -114,6 +116,8 @@ The UI is at http://localhost:8080 and the API at http://localhost:5000. A one-s
 | POST | `/api/logout` | Revokes the bearer token used. `204`; `401` if not logged in |
 | GET | `/api/me` | The logged-in user `{user: {id, email}}`; `401` without a valid token |
 | GET | `/api/usage` | The logged-in user's usage this month: `{used_seconds, limit_seconds, remaining_seconds, period_start, period_end}`; `401` without a valid token |
+| GET | `/api/health` | Liveness plus a database round trip: `200` `{status: "ok", db: "ok"}`, or `503` `{status: "degraded", db: "error"}` when the database does not answer. No auth, not rate limited |
+| GET | `/api/metrics` | Job queue metrics for operators; `404` unless `METRICS_TOKEN` is set, then `Authorization: Bearer <METRICS_TOKEN>` is required (`401` otherwise). `200` `{jobs: {queued, running, done, error}, oldest_queued_age_seconds, window_hours, finished_in_window: {done, error, avg_processing_seconds, audio_seconds}}`; the window is the last 24 hours |
 | GET | `/api/jobs/<job_id>` | Job status (`404` for another owner's job): `{id, status, progress, record, video_id, error, created_at, finished_at}` |
 | GET | `/api/export/<video_id>?format=` | Transcript as `srt`, `vtt`, `txt` (default) or `json`; `404` unless the viewer owns the record |
 
@@ -132,6 +136,12 @@ The worker records each job's transcribed length in `jobs.audio_seconds` as soon
 ### Rate limiting
 
 `/api/search` and `/api/upload` are limited per caller in one-minute windows: every `/api/search` call counts against the search limit (`RATE_LIMIT_SEARCH_PER_MIN`, default 60), and anything that queues a new job (`/api/upload`, or `/api/search` with a new record) also counts against the ingest limit (`RATE_LIMIT_INGEST_PER_MIN`, default 10). Over the limit is `429` with `{error, retry_after_seconds}` and a `Retry-After` header; the ingest check runs before the quota check and before any file is stored. A caller is the logged-in user, or the remote address when anonymous (behind a reverse proxy, anonymous callers share the proxy's address unless it is rewritten, e.g. with werkzeug `ProxyFix`). Counters live in the `rate_limits` table so the limit holds across api processes; windows are fixed, so a burst up to twice the limit is possible across a boundary. If the limiter's database call fails the request is let through. `0` turns a limit off.
+
+### Observability
+
+The api and the worker log one JSON object per line to stderr (`ts`, `level`, `service` = `api` or `worker`, `logger`, `message`, plus context fields). The api logs every request (`method`, `path`, `status`, `duration_ms`; `/api/health` only at `DEBUG`), and the worker logs `job started`, `job done` and `job failed` with `job_id`, `record`, `status`, `duration_seconds` and `audio_seconds`, and the traceback for failures. Set `LOG_LEVEL` to change verbosity.
+
+`GET /api/health` is what the compose healthcheck for the api calls. For alerting, poll `GET /api/metrics` (enable it with `METRICS_TOKEN`) and watch `oldest_queued_age_seconds`: if it keeps growing while jobs are queued, the worker is down or stuck. Metrics are computed from the `jobs` table on each call, so they are the same whichever api process answers; there is no separate metrics store.
 
 ## Tests
 

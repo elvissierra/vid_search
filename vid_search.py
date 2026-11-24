@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 
@@ -6,6 +7,8 @@ from psycopg2.extras import execute_values
 import diarize
 import embeddings
 from db import get_conn
+
+log = logging.getLogger(__name__)
 
 _model = None
 
@@ -23,7 +26,7 @@ def get_model():
 def download_video_audio(url):
     import yt_dlp
     try:
-        print(f"Attempting to download audio from: {url}")
+        log.info("downloading audio", extra={"url": url})
         ydl_opts = {
              'format': 'bestaudio/best',
              'postprocessors': [{
@@ -41,10 +44,10 @@ def download_video_audio(url):
                   audio_file = downloads[0]['filepath']
              else:
                   audio_file = os.path.splitext(ydl.prepare_filename(info_dict))[0] + '.mp3'
-             print(f"Audio downloaded successfully: {audio_file}")
+             log.info("audio downloaded", extra={"audio_file": audio_file})
              return audio_file
     except Exception as e:
-         print(f"Error downloading video: {e}")
+         log.error("audio download failed: %s", e)
          raise
 
 
@@ -105,7 +108,7 @@ def embed_segments(segments):
             return []
         vectors = embeddings.embed([text for (_, text, _, _) in items])
     except Exception as e:
-        print(f"Embedding failed, continuing without semantic index: {e}")
+        log.warning("embedding failed, continuing without semantic index: %s", e)
         return []
     return [item + (vec,) for item, vec in zip(items, vectors)]
 

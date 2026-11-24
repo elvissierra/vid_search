@@ -1,7 +1,10 @@
+import hmac
+import logging
 import os
+import time
 import uuid
 
-from flask import Flask, request, jsonify
+from flask import Flask, g, request, jsonify
 from flask_cors import CORS
 import environ
 
@@ -9,6 +12,8 @@ import auth
 import embeddings
 import exports
 import feeds
+import logs
+import metrics
 import phrase
 import ratelimit
 from db import get_conn
@@ -19,6 +24,9 @@ from vid_search import reserve_record, release_record
 
 env = environ.Env()
 environ.Env.read_env()
+
+logs.configure("api")
+request_log = logging.getLogger("api.request")
 
 cors_origins = env("CORS_ORIGINS").split(",")
 app = Flask(__name__)
@@ -33,6 +41,25 @@ MAX_SEMANTIC_QUERY_CHARS = 500
 BULK_ENTRIES_DEFAULT = 10
 MAX_BULK_ENTRIES = 25
 MAX_RECORD_CHARS = 200
+
+
+@app.before_request
+def start_timer():
+    g.started = time.monotonic()
+
+
+@app.after_request
+def log_request(response):
+    started = getattr(g, "started", None)
+    # Health probes fire every few seconds; keep them out of the INFO stream.
+    level = logging.DEBUG if request.path == "/api/health" else logging.INFO
+    request_log.log(level, "request", extra={
+        "method": request.method,
+        "path": request.path,
+        "status": response.status_code,
+        "duration_ms": None if started is None else round((time.monotonic() - started) * 1000, 1),
+    })
+    return response
 
 
 @app.errorhandler(413)
@@ -77,6 +104,43 @@ def viewer():
     handler's generic 500.
     """
     return auth.viewer_id(request.headers.get('Authorization'))
+
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    """Liveness plus a database round trip, for load balancers and compose.
+    Unauthenticated and not rate limited. 200 when the database answers, else 503."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1;")
+                cursor.fetchone()
+    except Exception:
+        app.logger.exception("Health check failed")
+        return jsonify({"status": "degraded", "db": "error"}), 503
+    return jsonify({"status": "ok", "db": "ok"}), 200
+
+
+@app.route('/api/metrics', methods=['GET'])
+def get_metrics():
+    """
+    Job queue metrics for operators. Disabled (404) unless METRICS_TOKEN is
+    set; then the request must send `Authorization: Bearer <METRICS_TOKEN>`.
+    """
+    expected = os.environ.get("METRICS_TOKEN", "")
+    if not expected:
+        return jsonify({"error": "Not found"}), 404
+    header = request.headers.get("Authorization", "")
+    supplied = header[7:] if header.startswith("Bearer ") else ""
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return jsonify({"error": "Authentication required"}), 401
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                return jsonify(metrics.job_metrics(cursor)), 200
+    except Exception:
+        app.logger.exception("Failed to compute metrics")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route('/api/signup', methods=['POST'])
